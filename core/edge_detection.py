@@ -138,6 +138,12 @@ def group_edge_bands(candidates: Iterable[Dict[str, float]], settings: Measureme
 def select_edge_from_band(edge_band: Dict[str, float], edge_reference: str, side: str) -> float:
     if edge_reference == "center":
         return float(edge_band["center"])
+    if edge_reference == "strongest":
+        return float(edge_band["peak"])
+    if edge_reference == "outer":
+        return float(edge_band["start"] if side in {"left", "top"} else edge_band["end"])
+    if edge_reference == "inner":
+        return float(edge_band["end"] if side in {"left", "top"} else edge_band["start"])
     return float(edge_band["peak"])
 
 

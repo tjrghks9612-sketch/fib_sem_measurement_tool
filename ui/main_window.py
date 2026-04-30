@@ -405,27 +405,13 @@ class MainWindow(ctk.CTk):
         if clean_roi is None:
             self.set_status("ROI가 너무 작습니다.")
             return
-
         mode = self.option_panel.get_roi_apply_mode()
-        selected_targets = [image for image in self.image_items if image.selected]
-        targets = selected_targets or [item]
-        if item not in targets:
-            targets = [item] + targets
-
-        applied = 0
-        for target_item in targets:
-            target_roi = apply_roi_to_image(clean_roi, item.image_size, target_item.image_size, mode)
-            if target_roi is None:
-                continue
-            source = "image_specific" if target_item is item else "copied_from_previous"
-            settings = self._ensure_item_settings(target_item, source)
-            settings.roi = target_roi
-            settings.roi_apply_mode = mode
-            settings.roi_source_image = item.file_name
-            target_item.result = None
-            applied += 1
-
-        self.set_status(f"ROI 적용 완료: {applied}/{len(targets)}개 이미지 ({mode})")
+        settings = self._ensure_item_settings(item, "image_specific")
+        settings.roi = clean_roi
+        settings.roi_apply_mode = mode
+        settings.roi_source_image = item.file_name
+        item.result = None
+        self.set_status("ROI 적용: 현재 이미지")
         self.refresh_all()
         if self.current_image is not None:
             self._schedule_current_auto_measure()
@@ -538,8 +524,10 @@ class MainWindow(ctk.CTk):
             target_roi = apply_roi_to_image(source_settings.roi, source_item.image_size, target_item.image_size, mode)
             if target_roi is None:
                 continue
-            settings_source = "group_shared" if scope == "group" and target_item.group_id == source_item.group_id else "copied_from_previous"
-            target_settings = self._ensure_item_settings(target_item, settings_source)
+            if scope == "group" and target_item.group_id == source_item.group_id and target_item.settings is None:
+                applied += 1
+                continue
+            target_settings = self._ensure_item_settings(target_item, "copied_from_previous")
             target_settings.roi = target_roi
             target_settings.roi_apply_mode = mode
             target_settings.roi_source_image = source_item.file_name
@@ -612,10 +600,8 @@ class MainWindow(ctk.CTk):
             item.settings = None
             self.set_status(f"{item.file_name}: 개별 설정을 제거했습니다.")
         elif mode == "global":
-            settings = default_global_settings()
-            settings.settings_source = "global_default"
-            item.settings = settings
-            self.set_status(f"{item.file_name}: 전역 기본값으로 되돌렸습니다.")
+            item.settings = None
+            self.set_status(f"{item.file_name}: 전역/그룹 설정을 다시 따릅니다.")
         self.refresh_all()
 
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
