@@ -160,6 +160,10 @@ def merge_settings(base: MeasurementSettings, override: Optional[MeasurementSett
     if override is None:
         return merged
     override_dict = override.to_dict()
+    unknown_keys = set(override_dict.keys()) - set(MeasurementSettings.__dataclass_fields__.keys())
+    if unknown_keys:
+        raise ValueError(f"허용되지 않은 설정 키가 있습니다: {sorted(unknown_keys)}")
+
     for key, value in override_dict.items():
         if key == "advanced":
             merged.advanced = AdvancedSettings(**value)
@@ -185,4 +189,3 @@ def resolve_effective_settings(image_item: Any, group_settings: Dict[str, Any], 
         settings.settings_source = source if source in SETTINGS_SOURCES else "image_specific"
 
     return settings
-
