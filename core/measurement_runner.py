@@ -21,6 +21,20 @@ class MeasurementRoiError(ValueError):
     pass
 
 
+class UnsupportedMeasurementTypeError(ValueError):
+    pass
+
+
+def _measurement_log_context(settings: MeasurementSettings, image: np.ndarray) -> dict:
+    return {
+        "measurement_type": settings.measurement_type,
+        "roi": settings.roi,
+        "image_shape": tuple(int(v) for v in image.shape),
+        "noise_level": settings.noise_level,
+        "confidence_threshold": settings.advanced.confidence_threshold,
+    }
+
+
 def _status_by_threshold(confidence: float, threshold: float, failed: bool = False) -> str:
     if failed:
         return MeasurementStatus.FAIL.value
@@ -48,6 +62,7 @@ def calculate_confidence(result: MeasurementResult, settings: MeasurementSetting
 
 
 def run_measurement(image: np.ndarray, settings: MeasurementSettings) -> MeasurementResult:
+    context = _measurement_log_context(settings, image)
     try:
         gray = to_gray(image)
         processed_gray = preprocess_image(gray, settings)
@@ -73,27 +88,18 @@ def run_measurement(image: np.ndarray, settings: MeasurementSettings) -> Measure
             result = measure_single_taper(processed_gray, clean_roi, settings.taper_side, settings)
             result.measurement_type = settings.measurement_type
         else:
-            return _fail_result(settings.measurement_type, "지원하지 않는 측정 타입입니다")
+            raise UnsupportedMeasurementTypeError("지원하지 않는 측정 타입입니다")
         calculate_confidence(result, settings)
         return result
     except MeasurementRoiError as exc:
-        logger.info(
-            "measurement_failed type=roi_error measurement_type=%s roi=%s",
-            settings.measurement_type,
-            settings.roi,
-        )
+        logger.info("measurement_failed type=roi_error message=%s context=%s", str(exc), context)
+        return _fail_result(settings.measurement_type, str(exc))
+    except UnsupportedMeasurementTypeError as exc:
+        logger.warning("measurement_failed type=unsupported_measurement_type message=%s context=%s", str(exc), context)
         return _fail_result(settings.measurement_type, str(exc))
     except (TypeError, ValueError, FloatingPointError) as exc:
-        logger.exception(
-            "measurement_failed type=calculation_error measurement_type=%s roi=%s",
-            settings.measurement_type,
-            settings.roi,
-        )
+        logger.exception("measurement_failed type=calculation_error message=%s context=%s", str(exc), context)
         return _fail_result(settings.measurement_type, f"측정 연산 오류: {exc}")
     except Exception as exc:
-        logger.exception(
-            "measurement_failed type=unknown_error measurement_type=%s roi=%s",
-            settings.measurement_type,
-            settings.roi,
-        )
+        logger.exception("measurement_failed type=unknown_error message=%s context=%s", str(exc), context)
         return _fail_result(settings.measurement_type, f"측정 중 오류: {exc}")

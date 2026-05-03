@@ -64,6 +64,39 @@ SETTINGS_SOURCES = (
     "copied_from_previous",
 )
 
+NOISE_PRESET_TABLE = {
+    "low": {
+        "blur_kernel": 3,
+        "median_filter_size": 0,
+        "scan_line_count": 15,
+        "minimum_valid_line_count": 6,
+        "min_valid_line_ratio": 0.40,
+        "outlier_rejection_strength": 2.0,
+        "sensitivity": 0.62,
+        "peak_prominence": 0.10,
+    },
+    "medium": {
+        "blur_kernel": 5,
+        "median_filter_size": 3,
+        "scan_line_count": 21,
+        "minimum_valid_line_count": 8,
+        "min_valid_line_ratio": 0.45,
+        "outlier_rejection_strength": 1.5,
+        "sensitivity": 0.70,
+        "peak_prominence": 0.12,
+    },
+    "high": {
+        "blur_kernel": 7,
+        "median_filter_size": 5,
+        "scan_line_count": 31,
+        "minimum_valid_line_count": 14,
+        "min_valid_line_ratio": 0.55,
+        "outlier_rejection_strength": 1.2,
+        "sensitivity": 0.82,
+        "peak_prominence": 0.16,
+    },
+}
+
 
 @dataclass
 class AdvancedSettings:
@@ -117,33 +150,9 @@ class MeasurementSettings:
     def apply_noise_preset(self, force: bool = False) -> None:
         if self.custom_option and not force:
             return
-        if self.noise_level == "low":
-            self.advanced.blur_kernel = 3
-            self.advanced.median_filter_size = 0
-            self.advanced.scan_line_count = 15
-            self.advanced.minimum_valid_line_count = 6
-            self.advanced.min_valid_line_ratio = 0.40
-            self.advanced.outlier_rejection_strength = 2.0
-            self.advanced.sensitivity = 0.62
-            self.advanced.peak_prominence = 0.10
-        elif self.noise_level == "high":
-            self.advanced.blur_kernel = 7
-            self.advanced.median_filter_size = 5
-            self.advanced.scan_line_count = 31
-            self.advanced.minimum_valid_line_count = 14
-            self.advanced.min_valid_line_ratio = 0.55
-            self.advanced.outlier_rejection_strength = 1.2
-            self.advanced.sensitivity = 0.82
-            self.advanced.peak_prominence = 0.16
-        else:
-            self.advanced.blur_kernel = 5
-            self.advanced.median_filter_size = 3
-            self.advanced.scan_line_count = 21
-            self.advanced.minimum_valid_line_count = 8
-            self.advanced.min_valid_line_ratio = 0.45
-            self.advanced.outlier_rejection_strength = 1.5
-            self.advanced.sensitivity = 0.70
-            self.advanced.peak_prominence = 0.12
+        preset = NOISE_PRESET_TABLE.get(self.noise_level, NOISE_PRESET_TABLE["medium"])
+        for key, value in preset.items():
+            setattr(self.advanced, key, value)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -163,11 +172,19 @@ def merge_settings(base: MeasurementSettings, override: Optional[MeasurementSett
     unknown_keys = set(override_dict.keys()) - set(MeasurementSettings.__dataclass_fields__.keys())
     if unknown_keys:
         raise ValueError(f"허용되지 않은 설정 키가 있습니다: {sorted(unknown_keys)}")
+    advanced_keys = set(AdvancedSettings.__dataclass_fields__.keys())
+    calibration_keys = set(CalibrationSettings.__dataclass_fields__.keys())
 
     for key, value in override_dict.items():
         if key == "advanced":
+            nested_unknown = set(value.keys()) - advanced_keys
+            if nested_unknown:
+                raise ValueError(f"허용되지 않은 고급 설정 키가 있습니다: {sorted(nested_unknown)}")
             merged.advanced = AdvancedSettings(**value)
         elif key == "calibration":
+            nested_unknown = set(value.keys()) - calibration_keys
+            if nested_unknown:
+                raise ValueError(f"허용되지 않은 보정 설정 키가 있습니다: {sorted(nested_unknown)}")
             merged.calibration = CalibrationSettings(**value)
         else:
             setattr(merged, key, value)
