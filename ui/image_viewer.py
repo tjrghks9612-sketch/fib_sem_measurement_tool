@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import tkinter as tk
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Optional, Tuple
 
 import cv2
 import customtkinter as ctk
@@ -45,6 +45,8 @@ class ImageViewer(ctk.CTkFrame):
         self.drag_start_canvas: Optional[Tuple[int, int]] = None
         self.drag_item: Optional[int] = None
         self._content_image_id = None
+        self._last_render_state = None
+        self._last_hover_xy = (None, None)
 
         self._build()
 
@@ -99,6 +101,9 @@ class ImageViewer(ctk.CTkFrame):
         self.image_bgr = None
         self.render_bgr = None
         self.canvas.delete("all")
+        self._canvas_image_item = None
+        self._last_render_state = None
+        self._last_hover_xy = (None, None)
         self.title_var.set("메인 이미지 미리보기")
         self.meta_var.set("이미지를 불러오세요")
         self.status_var.set("")
@@ -142,11 +147,17 @@ class ImageViewer(ctk.CTkFrame):
         self.draw_h = max(1, int(h * self.scale))
         self.offset_x = int((canvas_w - self.draw_w) / 2)
         self.offset_y = int((canvas_h - self.draw_h) / 2)
-        rgb = cv2.cvtColor(self.render_bgr, cv2.COLOR_BGR2RGB)
-        pil = Image.fromarray(rgb).resize((self.draw_w, self.draw_h), Image.BILINEAR)
-        self.tk_image = ImageTk.PhotoImage(pil)
-        self.canvas.delete("all")
-        self.canvas.create_image(self.offset_x, self.offset_y, image=self.tk_image, anchor="nw")
+        render_state = (id(self.render_bgr), self.draw_w, self.draw_h, self.offset_x, self.offset_y)
+        if render_state != self._last_render_state:
+            rgb = cv2.cvtColor(self.render_bgr, cv2.COLOR_BGR2RGB)
+            pil = Image.fromarray(rgb).resize((self.draw_w, self.draw_h), Image.BILINEAR)
+            self.tk_image = ImageTk.PhotoImage(pil)
+            self._last_render_state = render_state
+        if getattr(self, "_canvas_image_item", None) is None:
+            self._canvas_image_item = self.canvas.create_image(self.offset_x, self.offset_y, image=self.tk_image, anchor="nw")
+        else:
+            self.canvas.coords(self._canvas_image_item, self.offset_x, self.offset_y)
+            self.canvas.itemconfig(self._canvas_image_item, image=self.tk_image)
         if self.fit_mode:
             self.zoom_var.set("Fit")
         else:
@@ -171,12 +182,18 @@ class ImageViewer(ctk.CTkFrame):
         if self.on_hover_profile is None:
             return
         if not self._is_canvas_inside_image(event.x, event.y):
-            self.on_hover_profile(None, None)
+            if self._last_hover_xy != (None, None):
+                self._last_hover_xy = (None, None)
+                self.on_hover_profile(None, None)
             return
-        self.on_hover_profile(*self._canvas_to_image(event.x, event.y))
+        point = self._canvas_to_image(event.x, event.y)
+        if point != self._last_hover_xy:
+            self._last_hover_xy = point
+            self.on_hover_profile(*point)
 
     def _on_leave(self, _event) -> None:
-        if self.on_hover_profile is not None:
+        if self.on_hover_profile is not None and self._last_hover_xy != (None, None):
+            self._last_hover_xy = (None, None)
             self.on_hover_profile(None, None)
 
     def _on_press(self, event) -> None:
