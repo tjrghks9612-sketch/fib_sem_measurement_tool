@@ -360,7 +360,7 @@ class OptionPanel(ctk.CTkFrame):
         return ROI_APPLY_MODE_BY_LABEL.get(self.roi_apply_mode_var.get(), "relative_copy")
 
     def get_calibration_inputs(self):
-        mode = "auto"
+        mode = self.calibration_mode_var.get()
         pixel_text = self.detected_px_var.get()
         try:
             pixel_length = float(pixel_text)
@@ -376,4 +376,8 @@ class OptionPanel(ctk.CTkFrame):
         self.detected_px_var.set("" if pixel_length is None else f"{pixel_length:.3f}")
         if pixel_length:
             self.calibration_mode_var.set("auto")
+
+    def set_manual_calibration_length(self, pixel_length: float) -> None:
+        self.detected_px_var.set(f"{float(pixel_length):.3f}")
+        self.calibration_mode_var.set("manual")
 

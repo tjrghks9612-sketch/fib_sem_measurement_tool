@@ -89,7 +89,7 @@ def measure_horizontal_cd(gray: np.ndarray, roi: Sequence[int], settings: Measur
     lvals = interpolate_track(left, grid)
     rvals = interpolate_track(right, grid)
     valid = np.isfinite(lvals) & np.isfinite(rvals) & ((rvals - lvals) > 0.5)
-    pairs = [(float(y1 + ys[int(g)]), float(x1 + lvals[i]), float(x1 + rvals[i])) for i, g in enumerate(grid[valid])]
+    pairs = [(float(scan_coord), float(lvals[i]), float(rvals[i])) for i, scan_coord in enumerate(grid[valid])]
     values = [p[2] - p[1] for p in pairs]
     return _finalize(result, values, pairs, left, right, settings, warnings)
 
@@ -117,6 +117,6 @@ def measure_vertical_thk(gray: np.ndarray, roi: Sequence[int], settings: Measure
     tvals = interpolate_track(top, grid)
     bvals = interpolate_track(bottom, grid)
     valid = np.isfinite(tvals) & np.isfinite(bvals) & ((bvals - tvals) > 0.5)
-    pairs = [(float(x1 + xs[int(g)]), float(y1 + tvals[i]), float(y1 + bvals[i])) for i, g in enumerate(grid[valid])]
+    pairs = [(float(scan_coord), float(tvals[i]), float(bvals[i])) for i, scan_coord in enumerate(grid[valid])]
     values = [p[2] - p[1] for p in pairs]
     return _finalize(result, values, pairs, top, bottom, settings, warnings)
