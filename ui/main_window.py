@@ -23,6 +23,7 @@ from fib_sem_measurement_tool.core.roi_utils import apply_roi_to_image, normaliz
 from fib_sem_measurement_tool.export.csv_exporter import export_results_to_csv
 from fib_sem_measurement_tool.models.group_item import GroupItem
 from fib_sem_measurement_tool.models.image_item import ImageItem
+from fib_sem_measurement_tool.models.result import MeasurementResult
 from fib_sem_measurement_tool.models.settings import (
     MEASUREMENT_TYPES,
     MeasurementSettings,
@@ -54,6 +55,8 @@ class MainWindow(ctk.CTk):
         self.scale_bar_bboxes: Dict[str, tuple] = {}
         self.calibration_lines: Dict[str, tuple] = {}
         self._auto_measure_after_id = None
+        self._measure_batch_after_id = None
+        self._measure_batch_running = False
         self.auto_measure_delay_ms = 250
         self._thumbnail_refresh_after_id = None
         self._profile_image_path = ""
@@ -158,6 +161,7 @@ class MainWindow(ctk.CTk):
             try:
                 image_size, thumbnail = read_image_metadata(path)
                 self.image_items.append(ImageItem.from_path(path, image_size, thumbnail))
+                existing.add(path)
                 added += 1
             except Exception as exc:
                 errors.append(f"{Path(path).name}: {exc}")
@@ -421,6 +425,7 @@ class MainWindow(ctk.CTk):
         if item is None:
             return
         self.calibration_lines[item.image_path] = line
+        self.option_panel.set_manual_calibration_length(length)
         self.set_status(f"수동 캘리브레이션 선 길이: {length:.2f} px (참고용)")
         self.render_current_image()
 
@@ -606,16 +611,31 @@ class MainWindow(ctk.CTk):
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:
             return
+        if self.__dict__.get("_measure_batch_running", False):
+            return
         scope = force_scope or self.option_panel.get_scope()
         targets = self._targets_for_scope(scope)
         if not targets:
             return
-        failures = 0
-        for idx, item in enumerate(targets, start=1):
-            self.set_status(f"측정 중 {idx}/{len(targets)}: {item.file_name}")
+        self._measure_batch_running = True
+        self._measure_batch_next(targets, 0, 0)
+
+    def _measure_batch_next(self, targets: List[ImageItem], index: int, failures: int) -> None:
+        if index >= len(targets):
+            self._measure_batch_running = False
+            self._measure_batch_after_id = None
+            self.load_current_image()
+            self.refresh_thumbnail_panel()
+            self.set_status(f"{len(targets)}개 이미지 측정 완료" + (f" / Fail {failures}개" if failures else ""))
+            return
+
+        item = targets[index]
+        settings = self.resolve_settings_for_item(item)
+        try:
+            self.set_status(f"측정 중 {index + 1}/{len(targets)}: {item.file_name}")
             image = self.load_image_cached(item.image_path)
-            settings = self.resolve_settings_for_item(item)
             item.result = run_measurement(image, settings)
+            item.last_error = ""
             if item.result.status == "Fail":
                 failures += 1
             if settings.advanced.overlay_save_enabled:
@@ -630,6 +650,20 @@ class MainWindow(ctk.CTk):
                 )
                 out_path = Path(item.image_path).with_name(f"{Path(item.image_path).stem}_overlay.png")
                 save_image_unicode(str(out_path), rendered)
+        except Exception as exc:
+            failures += 1
+            item.last_error = str(exc)
+            item.result = MeasurementResult(
+                measurement_type=settings.measurement_type,
+                overall_confidence=0.0,
+                status="Fail",
+                warning_message=f"측정 처리 오류: {exc}",
+            )
+
+        next_index = index + 1
+        if next_index < len(targets):
+            self._measure_batch_after_id = self.after(1, self._measure_batch_next, targets, next_index, failures)
+            return
         self.load_current_image()
         self.refresh_thumbnail_panel()
         self.set_status(f"{len(targets)}개 이미지 측정 완료" + (f" / Fail {failures}개" if failures else ""))

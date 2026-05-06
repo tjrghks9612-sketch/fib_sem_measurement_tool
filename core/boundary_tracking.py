@@ -20,6 +20,7 @@ class EdgeBand:
     scan_index: int
     scan_coord: float
     axis_coord: float
+    axis_length: int
 
 
 @dataclass
@@ -97,7 +98,14 @@ def extract_edge_bands(
     bands: List[EdgeBand] = []
     for g in grouped:
         peak = max(g, key=lambda x: x[1])
-        start, end = g[0][0], g[-1][0]
+        peak_idx = int(round(peak[0]))
+        start_idx = peak_idx
+        end_idx = peak_idx
+        while start_idx > margin and mag[start_idx - 1] >= min_strength:
+            start_idx -= 1
+        while end_idx < data.size - margin - 1 and mag[end_idx + 1] >= min_strength:
+            end_idx += 1
+        start, end = float(start_idx), float(end_idx)
         center = (start + end) / 2.0
         peak_pos = peak[0]
         bands.append(
@@ -112,6 +120,7 @@ def extract_edge_bands(
                 scan_index=int(scan_index),
                 scan_coord=float(scan_coord),
                 axis_coord=float(axis_offset + peak_pos),
+                axis_length=int(data.size),
             )
         )
     return bands
@@ -139,15 +148,25 @@ def build_boundary_track(
     max_jump = 8.0
     tracks: List[Dict[str, object]] = []
     for idx, bands in enumerate(scan_bands):
-        for band in bands:
-            pos = edge_position(band, edge_reference, side)
-            x = pos
-            tracks.append({"points": [(idx, x, band)], "last": x, "gaps": 0})
+        preferred_bands = [
+            band
+            for band in bands
+            if (
+                edge_position(band, edge_reference, side) <= max(1.0, band.axis_length - 1.0) * 0.5
+                if side in {"left", "top"}
+                else edge_position(band, edge_reference, side) >= max(1.0, band.axis_length - 1.0) * 0.5
+            )
+        ]
+        active_bands = preferred_bands or bands
+        previous_tracks = list(tracks)
         new_tracks = []
-        for tr in tracks:
+        for band in active_bands:
+            pos = edge_position(band, edge_reference, side)
+            new_tracks.append({"points": [(idx, pos, band)], "last": pos, "gaps": 0})
+        for tr in previous_tracks:
             last = float(tr["last"])
             attached = False
-            for band in bands:
+            for band in active_bands:
                 pos = edge_position(band, edge_reference, side)
                 if abs(pos - last) <= max_jump:
                     pts = list(tr["points"])
@@ -161,6 +180,7 @@ def build_boundary_track(
 
     min_points = max(3, int(settings.advanced.minimum_valid_line_count * 0.6), int(total * settings.advanced.min_valid_line_ratio))
     best: Optional[BoundaryTrack] = None
+    fallback_best: Optional[BoundaryTrack] = None
     for tr in tracks:
         pts = tr["points"]
         if len(pts) < min_points:
@@ -177,8 +197,19 @@ def build_boundary_track(
         fit_error = float(np.sqrt(np.mean((edge_coords - fit) ** 2)))
         mean_strength = float(np.mean(strengths))
         prior_pos = float(np.median([p[1] for p in pts]))
-        prior_score = max(0.0, 1.0 - abs(prior_pos / max(1.0, np.max([len(b) for b in scan_bands if b] + [1])) - center_prior))
-        score = 100.0 * (0.32 * coverage + 0.18 * min(1.0, mean_strength / (np.max(strengths) + 1e-6)) + 0.15 * smoothness + 0.15 * continuity + 0.10 * prior_score + 0.10 * (1.0 / (1.0 + fit_error)))
+        axis_lengths = [p[2].axis_length for p in pts]
+        axis_length = max(1.0, float(np.median(axis_lengths)) - 1.0)
+        prior_score = max(0.0, 1.0 - abs((prior_pos / axis_length) - center_prior))
+        preferred_half = (prior_pos <= axis_length * 0.5) if side in {"left", "top"} else (prior_pos >= axis_length * 0.5)
+        strength_score = min(1.0, mean_strength / (np.max(strengths) + 1e-6))
+        score = 100.0 * (
+            0.28 * coverage
+            + 0.12 * strength_score
+            + 0.14 * smoothness
+            + 0.14 * continuity
+            + 0.22 * prior_score
+            + 0.10 * (1.0 / (1.0 + fit_error))
+        )
         candidate = BoundaryTrack(
             points=[(float(sc), float(ec)) for sc, ec in zip(scan_coords, edge_coords)],
             side=side,
@@ -189,9 +220,11 @@ def build_boundary_track(
             fit_error=fit_error,
             score=score,
         )
-        if best is None or candidate.score > best.score:
+        if fallback_best is None or candidate.score > fallback_best.score:
+            fallback_best = candidate
+        if preferred_half and (best is None or candidate.score > best.score):
             best = candidate
-    return best
+    return best or fallback_best
 
 
 def interpolate_track(track: BoundaryTrack, at: np.ndarray) -> np.ndarray:

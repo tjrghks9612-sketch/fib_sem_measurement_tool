@@ -48,9 +48,14 @@ def _fit_track(track, side: str, settings: MeasurementSettings) -> TaperSideResu
     res.inlier_count = int(xs.size)
     res.points = [(float(x), float(y)) for y, x in zip(ys, xs)]
     res.fit_line = (float(m * np.min(ys) + b), float(np.min(ys)), float(m * np.max(ys) + b), float(np.max(ys)))
-    conf = 100.0 * (0.35 * track.coverage + 0.2 * track.smoothness + 0.15 * track.continuity + 0.15 * (1.0 / (1.0 + err)) + 0.15 * min(1.0, track.mean_strength / (track.mean_strength + 1.0)))
+    fit_threshold = max(1e-6, float(settings.advanced.fit_error_threshold))
+    fit_quality = max(0.0, 1.0 - err / (fit_threshold * 3.0))
+    conf = 100.0 * (0.35 * track.coverage + 0.2 * track.smoothness + 0.15 * track.continuity + 0.15 * fit_quality + 0.15 * min(1.0, track.mean_strength / (track.mean_strength + 1.0)))
     res.confidence = float(max(0.0, min(100.0, conf)))
     res.status = _status(res.confidence, settings.advanced.confidence_threshold)
+    if err > fit_threshold:
+        res.status = "Fail" if err > fit_threshold * 3.0 else "Review Needed"
+        res.warning_message = f"fit error {err:.2f} exceeds threshold {fit_threshold:.2f}"
     return res
 
 
