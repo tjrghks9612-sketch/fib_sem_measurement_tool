@@ -60,9 +60,8 @@ class OptionPanel(ctk.CTkFrame):
         self.noise_level_var = tk.StringVar(value=NOISE_LEVELS["medium"])
         self.scope_var = tk.StringVar(value=SCOPES["current"])
         self.roi_apply_mode_var = tk.StringVar(value=ROI_APPLY_MODES["relative_copy"])
-        self.calibration_mode_var = tk.StringVar(value="manual")
+        self.calibration_mode_var = tk.StringVar(value="auto")
         self.detected_px_var = tk.StringVar(value="")
-        self.manual_px_var = tk.StringVar(value="")
         self.actual_length_var = tk.StringVar(value="")
         self.unit_var = tk.StringVar(value="um")
 
@@ -115,13 +114,10 @@ class OptionPanel(ctk.CTkFrame):
         self._combo_row("노이즈 프리셋", self.noise_level_var, list(NOISE_LEVELS.values()), lambda _v: self._noise_changed())
 
         self._section_label("캘리브레이션")
-        self._radio_row("모드", self.calibration_mode_var, [("자동", "auto"), ("수동", "manual")])
         button_row = ctk.CTkFrame(self.body, fg_color="transparent")
         button_row.pack(fill="x", pady=(4, 6))
         ctk.CTkButton(button_row, text="스케일바 자동 검출", command=self.on_detect_scale_bar).pack(side="left", fill="x", expand=True, padx=(0, 4))
-        ctk.CTkButton(button_row, text="수동 선", fg_color="#203246", command=self.on_draw_calibration_line).pack(side="left", fill="x", expand=True, padx=(4, 0))
         self._entry_row("감지 px", self.detected_px_var)
-        self._entry_row("수동 px", self.manual_px_var)
         self._entry_row("실제 길이", self.actual_length_var)
         self._combo_row("단위", self.unit_var, ["nm", "um", "µm", "mm"], lambda _v: self._changed(False))
         ctk.CTkButton(self.body, text="캘리브레이션 적용", command=self.on_apply_calibration).pack(fill="x", pady=(6, 10))
@@ -326,10 +322,9 @@ class OptionPanel(ctk.CTkFrame):
         self.edge_reference_var.set(EDGE_REFERENCES.get(settings.edge_reference, EDGE_REFERENCES["inner"]))
         self.noise_level_var.set(NOISE_LEVELS.get(settings.noise_level, NOISE_LEVELS["medium"]))
         self.roi_apply_mode_var.set(ROI_APPLY_MODES.get(settings.roi_apply_mode, ROI_APPLY_MODES["relative_copy"]))
-        self.calibration_mode_var.set(settings.calibration.mode)
+        self.calibration_mode_var.set("auto")
         self.unit_var.set(settings.calibration.unit if settings.calibration.unit != "px" else "um")
         self.detected_px_var.set("" if settings.calibration.detected_scale_bar_px is None else f"{settings.calibration.detected_scale_bar_px:.3f}")
-        self.manual_px_var.set("" if settings.calibration.manual_pixel_length is None else f"{settings.calibration.manual_pixel_length:.3f}")
         self.actual_length_var.set("" if settings.calibration.actual_scale_bar_length is None else f"{settings.calibration.actual_scale_bar_length:.6g}")
         self._set_advanced_values(settings)
         self._loading = False
@@ -365,8 +360,8 @@ class OptionPanel(ctk.CTkFrame):
         return ROI_APPLY_MODE_BY_LABEL.get(self.roi_apply_mode_var.get(), "relative_copy")
 
     def get_calibration_inputs(self):
-        mode = self.calibration_mode_var.get()
-        pixel_text = self.detected_px_var.get() if mode == "auto" else self.manual_px_var.get()
+        mode = "auto"
+        pixel_text = self.detected_px_var.get()
         try:
             pixel_length = float(pixel_text)
         except (TypeError, ValueError):
@@ -382,6 +377,3 @@ class OptionPanel(ctk.CTkFrame):
         if pixel_length:
             self.calibration_mode_var.set("auto")
 
-    def set_manual_pixel_length(self, pixel_length: float) -> None:
-        self.manual_px_var.set(f"{pixel_length:.3f}")
-        self.calibration_mode_var.set("manual")

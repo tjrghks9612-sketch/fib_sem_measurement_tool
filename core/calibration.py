@@ -6,44 +6,65 @@ from typing import Dict, Optional, Tuple
 import cv2
 import numpy as np
 
-from fib_sem_measurement_tool.core.image_io import to_gray
 from fib_sem_measurement_tool.models.settings import CalibrationSettings
 
 
 def detect_scale_bar(image: np.ndarray) -> Dict[str, object]:
-    gray = to_gray(image)
-    height, width = gray.shape[:2]
-    search_regions = [
-        ("bottom", int(height * 0.68), height),
-        ("top", 0, int(height * 0.32)),
+    """Detect horizontal pure-green scale bar near the lower-left area.
+
+    Priority is given to connected components within the lower-left search window,
+    while still allowing fallback detection on the full image.
+    """
+    if image is None or image.size == 0:
+        return {"status": "not_found", "pixel_length": None, "bbox": None, "message": "이미지가 비어 있습니다"}
+
+    # BGR image from OpenCV: green line is (0, 255, 0) in RGB/BGR with a small tolerance.
+    b = image[:, :, 0]
+    g = image[:, :, 1]
+    r = image[:, :, 2]
+    green_mask = (g >= 245) & (b <= 12) & (r <= 12)
+
+    height, width = image.shape[:2]
+    if not np.any(green_mask):
+        return {
+            "status": "not_found",
+            "pixel_length": None,
+            "bbox": None,
+            "message": "좌하단의 초록색 스케일바(0,255,0)를 찾지 못했습니다",
+        }
+
+    search_windows = [
+        ("bottom_left", 0, int(width * 0.55), int(height * 0.60), height),
+        ("full", 0, width, 0, height),
     ]
 
     best: Optional[Dict[str, object]] = None
-    for region_name, y0, y1 in search_regions:
-        crop = gray[y0:y1, :]
-        if crop.size == 0:
+    for region_name, x0, x1, y0, y1 in search_windows:
+        crop = green_mask[y0:y1, x0:x1]
+        if crop.size == 0 or not np.any(crop):
             continue
-        threshold_value = max(160, int(np.percentile(crop, 94)))
-        _, binary = cv2.threshold(crop, threshold_value, 255, cv2.THRESH_BINARY)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 3))
+
+        binary = (crop.astype(np.uint8)) * 255
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
         for contour in contours:
             x, y, w, h = cv2.boundingRect(contour)
-            if w < width * 0.04 or h < 1 or h > max(18, width * 0.04):
+            if w < max(12, int(width * 0.03)):
+                continue
+            if h > max(12, int(height * 0.05)):
                 continue
             aspect = w / max(h, 1)
-            if aspect < 5:
+            if aspect < 4.0:
                 continue
-            area = cv2.contourArea(contour)
-            fill = area / max(w * h, 1)
-            score = w * min(aspect / 20.0, 1.0) * max(fill, 0.2)
+            score = float(w) * (1.2 if region_name == "bottom_left" else 1.0)
             candidate = {
                 "status": "detected",
                 "region": region_name,
                 "pixel_length": float(w),
-                "bbox": (int(x), int(y0 + y), int(x + w), int(y0 + y + h)),
-                "score": float(score),
+                "bbox": (int(x0 + x), int(y0 + y), int(x0 + x + w), int(y0 + y + h)),
+                "score": score,
             }
             if best is None or candidate["score"] > best["score"]:
                 best = candidate
@@ -53,7 +74,7 @@ def detect_scale_bar(image: np.ndarray) -> Dict[str, object]:
             "status": "not_found",
             "pixel_length": None,
             "bbox": None,
-            "message": "스케일바 선 후보를 찾지 못했습니다",
+            "message": "초록색 스케일바 후보를 찾지 못했습니다",
         }
     return best
 
