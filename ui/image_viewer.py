@@ -25,8 +25,8 @@ class ImageViewer(ctk.CTkFrame):
         self.on_overlay_toggled = on_overlay_toggled
         self.on_hover_profile = on_hover_profile
 
-        self.title_var = tk.StringVar(value="메인 이미지 미리보기")
-        self.meta_var = tk.StringVar(value="이미지를 불러오세요")
+        self.title_var = tk.StringVar(value="Image Viewer")
+        self.meta_var = tk.StringVar(value="Load images to begin.")
         self.status_var = tk.StringVar(value="")
         self.zoom_var = tk.StringVar(value="Fit")
         self.mode_var = tk.StringVar(value="roi")
@@ -83,7 +83,7 @@ class ImageViewer(ctk.CTkFrame):
     def set_mode(self, mode: str) -> None:
         self.mode_var.set(mode)
         self.canvas.configure(cursor="tcross" if mode == "calibration" else "crosshair")
-        self.status_var.set("수동 캘리브레이션 선 모드" if mode == "calibration" else self.status_var.get())
+        self.status_var.set("Calibration line mode" if mode == "calibration" else self.status_var.get())
 
     def set_content(self, image_bgr, render_bgr, title: str, meta: str, status: str) -> None:
         image_id = (id(image_bgr), image_bgr.shape if image_bgr is not None else None)
@@ -104,8 +104,8 @@ class ImageViewer(ctk.CTkFrame):
         self._canvas_image_item = None
         self._last_render_state = None
         self._last_hover_xy = (None, None)
-        self.title_var.set("메인 이미지 미리보기")
-        self.meta_var.set("이미지를 불러오세요")
+        self.title_var.set("Image Viewer")
+        self.meta_var.set("Load images to begin.")
         self.status_var.set("")
 
     def _toggle_overlay(self) -> None:

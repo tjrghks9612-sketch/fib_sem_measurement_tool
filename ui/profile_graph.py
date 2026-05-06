@@ -7,6 +7,16 @@ import cv2
 import customtkinter as ctk
 import numpy as np
 
+from fib_sem_measurement_tool.core.profile_markers import collect_profile_edge_markers
+from fib_sem_measurement_tool.models.result import MeasurementResult
+
+
+MARKER_COLORS = {
+    "CD": "#ffa437",
+    "THK": "#50f578",
+    "taper": "#ffdc4b",
+}
+
 
 class ProfileGraph(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
@@ -14,8 +24,10 @@ class ProfileGraph(ctk.CTkFrame):
         self.mode_var = tk.StringVar(value="Both")
         self.coord_var = tk.StringVar(value="Hover image to inspect grayscale profile")
         self.gray: Optional[np.ndarray] = None
+        self.result: Optional[MeasurementResult] = None
         self.cursor: Optional[Tuple[int, int]] = None
         self._image_id = None
+        self._result_id = None
         self._pending_cursor: Optional[Tuple[Optional[int], Optional[int]]] = None
         self._draw_after_id = None
         self._last_drawn_cursor: Optional[Tuple[int, int]] = None
@@ -42,8 +54,10 @@ class ProfileGraph(ctk.CTkFrame):
     def set_image(self, image_bgr) -> None:
         if image_bgr is None:
             self.gray = None
+            self.result = None
             self.cursor = None
             self._image_id = None
+            self._result_id = None
             self._last_drawn_cursor = None
             self.coord_var.set("No image")
             self._draw_graph()
@@ -59,6 +73,14 @@ class ProfileGraph(ctk.CTkFrame):
         self.cursor = None
         self._last_drawn_cursor = None
         self.coord_var.set("Hover image to inspect grayscale profile")
+        self._draw_graph()
+
+    def set_result(self, result: Optional[MeasurementResult]) -> None:
+        result_id = id(result) if result is not None else None
+        if result_id == self._result_id:
+            return
+        self.result = result
+        self._result_id = result_id
         self._draw_graph()
 
     def clear_cursor(self) -> None:
@@ -113,6 +135,39 @@ class ProfileGraph(ctk.CTkFrame):
             flat.extend([x, y])
         self.canvas.create_line(*flat, fill=color, width=2, smooth=True)
 
+    def _marker_color(self, label: str) -> str:
+        for prefix, color in MARKER_COLORS.items():
+            if label.startswith(prefix) or prefix in label:
+                return color
+        return "#f7e36d"
+
+    def _profile_x(self, position: float, profile_size: int, width: int) -> float:
+        if profile_size <= 1:
+            return 0.0
+        clamped = max(0.0, min(float(profile_size - 1), float(position)))
+        return clamped / float(profile_size - 1) * float(width - 1)
+
+    def _profile_y(self, value: float, height: int) -> float:
+        return float(height - 1 - (float(value) / 255.0) * (height - 16) - 8)
+
+    def _draw_edge_marker(self, profile: np.ndarray, position: float, label: str, width: int, height: int, row: int) -> None:
+        if profile.size == 0:
+            return
+        color = self._marker_color(label)
+        x = self._profile_x(position, int(profile.size), width)
+        index = int(round(max(0.0, min(float(profile.size - 1), float(position)))))
+        y = self._profile_y(float(profile[index]), height)
+        self.canvas.create_line(x, 8, x, height - 8, fill=color, dash=(3, 4), width=1)
+        self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline=color, fill="#071018", width=2)
+        anchor = "nw" if x < width - 72 else "ne"
+        text_x = x + 5 if anchor == "nw" else x - 5
+        text_y = min(height - 20, max(10, y + (row % 3 - 1) * 16))
+        self.canvas.create_text(text_x, text_y, text=label, fill=color, anchor=anchor, font=("Arial", 8, "bold"))
+
+    def _draw_edge_markers(self, axis: str, scan_index: int, profile: np.ndarray, width: int, height: int) -> None:
+        for idx, marker in enumerate(collect_profile_edge_markers(self.result, axis, scan_index)):
+            self._draw_edge_marker(profile, marker.position, marker.label, width, height, idx)
+
     def _draw_graph(self) -> None:
         self.canvas.delete("all")
         width = max(1, self.canvas.winfo_width())
@@ -136,9 +191,11 @@ class ProfileGraph(ctk.CTkFrame):
             horizontal = self.gray[y, :]
             step = max(1, int(len(horizontal) / max(width, 1)))
             self._draw_polyline(self._profile_points(horizontal, width, height), "#38a8ff", step)
+            self._draw_edge_markers("horizontal", y, horizontal, width, height)
             self.canvas.create_text(width - 8, 14, text="H", fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
         if mode in ("Both", "Vertical"):
             vertical = self.gray[:, x]
             step = max(1, int(len(vertical) / max(width, 1)))
             self._draw_polyline(self._profile_points(vertical, width, height), "#61f27a", step)
+            self._draw_edge_markers("vertical", x, vertical, width, height)
             self.canvas.create_text(width - 8, 30, text="V", fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))

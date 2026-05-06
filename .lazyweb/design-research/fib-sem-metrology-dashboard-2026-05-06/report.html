@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FIB/SEM Metrology Dashboard Design Research</title>
+  <style>
+    body { margin: 0; background: #f6f8fb; color: #17202a; font-family: Segoe UI, Arial, sans-serif; line-height: 1.55; }
+    main { max-width: 920px; margin: 0 auto; padding: 40px 24px 72px; }
+    h1, h2 { line-height: 1.2; }
+    h1 { font-size: 34px; margin-bottom: 16px; }
+    h2 { margin-top: 34px; color: #0f1720; }
+    .tldr { background: #e8f4ff; border: 1px solid #b9ddff; border-radius: 8px; padding: 16px 18px; }
+    pre { background: #101820; color: #e8f1f8; padding: 16px; border-radius: 8px; overflow: auto; }
+    img { display: block; max-width: 100%; border-radius: 8px; border: 1px solid #d9e1ea; box-shadow: 0 10px 30px rgba(16, 24, 40, .12); margin-top: 12px; }
+    em { color: #536272; }
+    li { margin: 6px 0; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Design Research: FIB/SEM Metrology Dashboard</h1>
+  <section class="tldr">
+    <strong>TL;DR.</strong> Lazyweb MCP references support a dense instrument-software layout: left image queue, central image canvas, right inspector, bottom result table, and explicit overlay/debug layers.
+  </section>
+
+  <h2>Recommendations</h2>
+  <ol>
+    <li>Use a central viewer as the main object, not a decorative preview.</li>
+    <li>Treat raw edge candidates like a debug/trace layer with low-opacity ticks.</li>
+    <li>Replace correctness-style confidence with coverage/count metrics.</li>
+    <li>Use charcoal surfaces, high-contrast text, and restrained cyan/green/yellow accents.</li>
+  </ol>
+
+  <h2>Applied Layout</h2>
+  <pre>FIB/SEM Measurement Tool | current file | load | run | CSV
+Image list | Image viewer with ROI/candidates/legend | Inspector
+Result table: file, mode, ROI, value, raw edges, coverage, selected, threshold</pre>
+
+  <h2>Key Lazyweb References</h2>
+  <img src="references/mantlebio.png" alt="MantleBio imaging dashboard">
+  <p><em>MantleBio: microscopy image thumbnail grid with sidebar navigation and image actions.</em></p>
+  <img src="references/centaur.png" alt="Centaur image annotation">
+  <p><em>Centaur: medical image annotation preview and image-first hierarchy.</em></p>
+  <img src="references/bitdrift.png" alt="bitdrift trace dashboard">
+  <p><em>bitdrift: dark trace/debug visualization with dense filters.</em></p>
+  <img src="references/launchdarkly.png" alt="LaunchDarkly observability dashboard">
+  <p><em>LaunchDarkly: dark observability dashboard with tables and operational controls.</em></p>
+  <img src="references/tractian.png" alt="Tractian quality dashboard">
+  <p><em>Tractian: manufacturing quality dashboard pattern with KPI status and actionable rows.</em></p>
+
+  <h2>Patterns Used</h2>
+  <ul>
+    <li>Large central visual workspace</li>
+    <li>Left navigation/list for input images</li>
+    <li>Right inspector for settings and selected result</li>
+    <li>Bottom data table for batch result review</li>
+    <li>Layer toggles for debug overlays</li>
+  </ul>
+</main>
+</body>
+</html>

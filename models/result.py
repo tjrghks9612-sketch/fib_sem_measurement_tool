@@ -12,6 +12,64 @@ class MeasurementStatus(str, Enum):
     FAIL = "Fail"
 
 
+@dataclass(frozen=True)
+class RawEdgeCandidate:
+    scan_axis: str
+    scan_index: int
+    local_scan_index: int
+    position: float
+    image_x: float
+    image_y: float
+    strength: float
+    signed_delta: float
+    sign: int
+    grayscale_before: float
+    grayscale_after: float
+
+
+@dataclass(frozen=True)
+class PairCandidate:
+    scan_axis: str
+    scan_index: int
+    local_scan_index: int
+    first: RawEdgeCandidate
+    second: RawEdgeCandidate
+
+    @property
+    def distance(self) -> float:
+        return float(self.second.position - self.first.position)
+
+
+@dataclass
+class EdgeScanResult:
+    scan_axis: str
+    roi: Tuple[int, int, int, int]
+    scanned_line_count: int
+    raw_edge_candidates: List[RawEdgeCandidate] = field(default_factory=list)
+    per_scanline_candidate_count: Dict[int, int] = field(default_factory=dict)
+    minimum_grayscale_delta: float = 0.0
+
+    @property
+    def raw_edge_count(self) -> int:
+        return len(self.raw_edge_candidates)
+
+    @property
+    def valid_scanline_count(self) -> int:
+        return sum(1 for count in self.per_scanline_candidate_count.values() if count > 0)
+
+    @property
+    def scanline_coverage(self) -> float:
+        if self.scanned_line_count <= 0:
+            return 0.0
+        return float(self.valid_scanline_count / self.scanned_line_count)
+
+    @property
+    def raw_edge_density(self) -> float:
+        if self.scanned_line_count <= 0:
+            return 0.0
+        return float(self.raw_edge_count / self.scanned_line_count)
+
+
 @dataclass
 class DistanceResult:
     orientation: str
@@ -29,6 +87,19 @@ class DistanceResult:
     warning_message: str = ""
     boundary_pairs: List[Tuple[float, float, float]] = field(default_factory=list)
     values_px: List[float] = field(default_factory=list)
+    raw_edge_candidates: List[RawEdgeCandidate] = field(default_factory=list)
+    pair_candidates: List[PairCandidate] = field(default_factory=list)
+    selected_pairs: List[PairCandidate] = field(default_factory=list)
+    selected_pair: Optional[PairCandidate] = None
+    per_scanline_candidate_count: Dict[int, int] = field(default_factory=dict)
+    raw_edge_count: int = 0
+    pair_candidate_count: int = 0
+    scanned_line_count: int = 0
+    valid_scanline_count: int = 0
+    scanline_coverage: float = 0.0
+    selected_point_count: int = 0
+    raw_edge_density: float = 0.0
+    minimum_grayscale_delta: float = 0.0
 
     def scaled(self, px_to_real: float) -> Dict[str, Optional[float]]:
         if not px_to_real:
@@ -57,6 +128,17 @@ class TaperSideResult:
     warning_message: str = ""
     points: List[Tuple[float, float]] = field(default_factory=list)
     fit_line: Optional[Tuple[float, float, float, float]] = None
+    raw_edge_candidates: List[RawEdgeCandidate] = field(default_factory=list)
+    selected_boundary_candidates: List[RawEdgeCandidate] = field(default_factory=list)
+    per_scanline_candidate_count: Dict[int, int] = field(default_factory=dict)
+    raw_edge_count: int = 0
+    scanned_line_count: int = 0
+    valid_scanline_count: int = 0
+    scanline_coverage: float = 0.0
+    selected_point_count: int = 0
+    fit_point_count: int = 0
+    raw_edge_density: float = 0.0
+    minimum_grayscale_delta: float = 0.0
 
 
 @dataclass
@@ -82,8 +164,22 @@ class MeasurementResult:
             value = self.vertical_thk.selected_px * px_to_real
             chunks.append(f"THK {value:.3g} {unit}")
         if self.left_taper and self.left_taper.angle_horizontal is not None:
-            chunks.append(f"L {self.left_taper.angle_horizontal:.1f}°")
+            chunks.append(f"L {self.left_taper.angle_horizontal:.1f} deg")
         if self.right_taper and self.right_taper.angle_horizontal is not None:
-            chunks.append(f"R {self.right_taper.angle_horizontal:.1f}°")
-        chunks.append(f"{self.status} {self.overall_confidence:.0f}%")
+            chunks.append(f"R {self.right_taper.angle_horizontal:.1f} deg")
+        chunks.append(f"{self.status} cov {self.overall_confidence:.0f}%")
         return " | ".join(chunks)
+
+    def raw_edge_count(self) -> int:
+        return sum(
+            item.raw_edge_count
+            for item in (self.horizontal_cd, self.vertical_thk, self.left_taper, self.right_taper)
+            if item is not None
+        )
+
+    def selected_point_count(self) -> int:
+        return sum(
+            item.selected_point_count
+            for item in (self.horizontal_cd, self.vertical_thk, self.left_taper, self.right_taper)
+            if item is not None
+        )

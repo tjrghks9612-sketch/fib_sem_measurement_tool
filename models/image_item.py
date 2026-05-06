@@ -16,8 +16,6 @@ class ImageItem:
     file_name: str
     image_size: Tuple[int, int]
     thumbnail: Optional[Image.Image] = None
-    group_id: str = ""
-    group_name: str = ""
     selected: bool = False
     settings: Optional[MeasurementSettings] = None
     result: Optional[MeasurementResult] = None

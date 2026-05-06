@@ -11,19 +11,15 @@ from fib_sem_measurement_tool.models.settings import MeasurementSettings, resolv
 CSV_COLUMNS = [
     "file_name",
     "full_path",
-    "group_id",
-    "group_name",
     "measurement_type",
-    "roi_apply_mode",
     "roi_source_image",
     "settings_source",
     "roi_x1",
     "roi_y1",
     "roi_x2",
     "roi_y2",
-    "edge_reference",
-    "noise_level",
     "distance_method",
+    "minimum_grayscale_delta",
     "px_to_real",
     "unit",
     "calibration_mode",
@@ -81,6 +77,28 @@ CSV_COLUMNS = [
     "status",
     "warning_message",
     "measurement_source",
+    "raw_edge_count",
+    "candidate_coverage",
+    "selected_point_count",
+    "pair_candidate_count",
+    "horizontal_cd_raw_edge_count",
+    "horizontal_cd_pair_candidate_count",
+    "horizontal_cd_scanline_coverage",
+    "horizontal_cd_selected_point_count",
+    "horizontal_cd_scanned_line_count",
+    "vertical_thk_raw_edge_count",
+    "vertical_thk_pair_candidate_count",
+    "vertical_thk_scanline_coverage",
+    "vertical_thk_selected_point_count",
+    "vertical_thk_scanned_line_count",
+    "left_taper_raw_edge_count",
+    "left_taper_scanline_coverage",
+    "left_taper_selected_point_count",
+    "left_taper_fit_point_count",
+    "right_taper_raw_edge_count",
+    "right_taper_scanline_coverage",
+    "right_taper_selected_point_count",
+    "right_taper_fit_point_count",
 ]
 
 
@@ -116,6 +134,11 @@ def _distance_values(prefix: str, row: Dict[str, object], result: Optional[Dista
     row[f"{prefix}_median"] = scaled["median"]
     row[f"{prefix}_std"] = scaled["std"]
     row[f"{prefix}_selected"] = scaled["selected"]
+    row[f"{prefix}_raw_edge_count"] = result.raw_edge_count
+    row[f"{prefix}_pair_candidate_count"] = result.pair_candidate_count
+    row[f"{prefix}_scanline_coverage"] = result.scanline_coverage
+    row[f"{prefix}_selected_point_count"] = result.selected_point_count
+    row[f"{prefix}_scanned_line_count"] = result.scanned_line_count
 
 
 def _taper_values(side: str, row: Dict[str, object], result: Optional[TaperSideResult]) -> None:
@@ -127,6 +150,10 @@ def _taper_values(side: str, row: Dict[str, object], result: Optional[TaperSideR
     row[f"{side}_fit_error"] = result.fit_error
     row[f"{side}_valid_point_count"] = result.inlier_count or result.valid_point_count
     row[f"{side}_taper_status"] = result.status
+    row[f"{side}_taper_raw_edge_count"] = result.raw_edge_count
+    row[f"{side}_taper_scanline_coverage"] = result.scanline_coverage
+    row[f"{side}_taper_selected_point_count"] = result.selected_point_count
+    row[f"{side}_taper_fit_point_count"] = result.fit_point_count
 
 
 def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str, object]:
@@ -137,19 +164,15 @@ def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str,
         {
             "file_name": item.file_name,
             "full_path": item.image_path,
-            "group_id": item.group_id,
-            "group_name": item.group_name,
             "measurement_type": settings.measurement_type,
-            "roi_apply_mode": settings.roi_apply_mode,
             "roi_source_image": settings.roi_source_image,
             "settings_source": settings.settings_source,
             "roi_x1": roi[0],
             "roi_y1": roi[1],
             "roi_x2": roi[2],
             "roi_y2": roi[3],
-            "edge_reference": settings.edge_reference,
-            "noise_level": settings.noise_level,
             "distance_method": settings.distance_method,
+            "minimum_grayscale_delta": settings.minimum_grayscale_delta,
             "px_to_real": settings.calibration.px_to_real,
             "unit": settings.calibration.unit,
             "calibration_mode": settings.calibration.mode,
@@ -173,20 +196,27 @@ def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str,
     row["status"] = result.status
     row["warning_message"] = result.warning_message
     row["measurement_source"] = result.measurement_source
+    row["raw_edge_count"] = result.raw_edge_count()
+    row["candidate_coverage"] = result.overall_confidence
+    row["selected_point_count"] = result.selected_point_count()
+    row["pair_candidate_count"] = sum(
+        distance.pair_candidate_count
+        for distance in (result.horizontal_cd, result.vertical_thk)
+        if distance is not None
+    )
     return row
 
 
 def export_results_to_csv(
     path: str,
     image_items: Iterable[ImageItem],
-    group_settings: Dict[str, object],
     global_settings: MeasurementSettings,
 ) -> None:
     with open(path, "w", encoding="utf-8-sig", newline="") as fp:
         writer = csv.DictWriter(fp, fieldnames=CSV_COLUMNS)
         writer.writeheader()
         for item in image_items:
-            settings = resolve_effective_settings(item, group_settings, global_settings)
+            settings = resolve_effective_settings(item, global_settings)
             row = make_result_row(item, settings)
             writer.writerow({key: _fmt(row.get(key, "")) for key in CSV_COLUMNS})
 
