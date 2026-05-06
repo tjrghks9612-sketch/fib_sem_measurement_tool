@@ -421,8 +421,7 @@ class MainWindow(ctk.CTk):
         if item is None:
             return
         self.calibration_lines[item.image_path] = line
-        self.option_panel.set_manual_pixel_length(length)
-        self.set_status(f"수동 캘리브레이션 선 길이: {length:.2f} px")
+        self.set_status(f"수동 캘리브레이션 선 길이: {length:.2f} px (참고용)")
         self.render_current_image()
 
     def on_overlay_toggled(self, enabled: bool) -> None:
@@ -540,7 +539,7 @@ class MainWindow(ctk.CTk):
         mode, pixel_length, actual_length, unit = self.option_panel.get_calibration_inputs()
         calibration = apply_calibration(pixel_length, actual_length, unit, mode=mode)
         if calibration.status != "calibrated":
-            messagebox.showwarning("캘리브레이션 실패", "pixel length와 실제 길이를 올바르게 입력하세요.")
+            messagebox.showwarning("캘리브레이션 실패", "초록색 스케일바 검출 또는 실제 길이 입력을 확인하세요.")
             return
         scope = self.option_panel.get_scope()
         item = self.current_item()
