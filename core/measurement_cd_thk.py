@@ -4,9 +4,7 @@ from typing import List, Sequence, Tuple
 
 import numpy as np
 
-from fib_sem_measurement_tool.core.confidence import distance_confidence
-from fib_sem_measurement_tool.core.edge_detection import detect_edge_candidates, group_edge_bands, select_edge_from_band
-from fib_sem_measurement_tool.core.roi_utils import normalize_roi
+from fib_sem_measurement_tool.core.boundary_tracking import build_boundary_track, extract_edge_bands, interpolate_track
 from fib_sem_measurement_tool.models.result import DistanceResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -20,99 +18,105 @@ def _sample_indices(length: int, count: int, margin_ratio: float = 0.12) -> np.n
     return np.unique(np.linspace(start, end, count).round().astype(int))
 
 
-def _status_by_threshold(confidence: float, threshold: float, failed: bool = False) -> str:
-    if failed:
+def _status(conf: float, th: float, fail: bool = False) -> str:
+    if fail:
         return "Fail"
-    if confidence >= threshold:
+    if conf >= th:
         return "OK"
-    if confidence >= max(0.0, threshold - 20.0):
+    if conf >= 60.0:
         return "Check"
     return "Review Needed"
 
 
-def _filter_distances(values: List[float], pairs: List[Tuple[float, float, float]], strength: float) -> Tuple[np.ndarray, List[Tuple[float, float, float]]]:
-    array = np.asarray(values, dtype=np.float32)
-    if array.size < 4:
-        return array, pairs
-    median = float(np.median(array))
-    mad = float(np.median(np.abs(array - median)))
+def _filter(values: np.ndarray, strength: float) -> np.ndarray:
+    if values.size < 4:
+        return values
+    med = float(np.median(values))
+    mad = float(np.median(np.abs(values - med)))
     if mad <= 1e-6:
-        return array, pairs
-    limit = max(2.0, float(strength) * 1.4826 * mad)
-    keep = np.abs(array - median) <= limit
-    return array[keep], [pair for pair, ok in zip(pairs, keep) if bool(ok)]
+        return values
+    lim = max(1.0, float(strength) * 1.4826 * mad)
+    return values[np.abs(values - med) <= lim]
 
 
-def _extract_pair(profile: np.ndarray, settings: MeasurementSettings, primary: str, secondary: str) -> Tuple[float, float] | None:
-    bands = group_edge_bands(detect_edge_candidates(profile, settings), settings)
-    if len(bands) < 2:
-        return None
-    sorted_bands = sorted(bands, key=lambda b: b["center"])
-    if primary in {"left", "top"}:
-        first, second = sorted_bands[0], sorted_bands[-1]
-    else:
-        first, second = sorted_bands[-1], sorted_bands[0]
-    a = select_edge_from_band(first, settings.edge_reference, primary)
-    b = select_edge_from_band(second, settings.edge_reference, secondary)
-    left, right = (a, b) if a <= b else (b, a)
-    if right - left <= 2:
-        return None
-    return float(left), float(right)
-
-
-def _finish(result: DistanceResult, values: List[float], pairs: List[Tuple[float, float, float]], settings: MeasurementSettings) -> DistanceResult:
-    filtered, filtered_pairs = _filter_distances(values, pairs, settings.advanced.outlier_rejection_strength)
-    result.values_px = [float(v) for v in filtered]
-    result.boundary_pairs = filtered_pairs
-    result.valid_count = int(filtered.size)
-    min_count = max(3, min(int(settings.advanced.minimum_valid_line_count), max(3, result.total_count)))
+def _finalize(result: DistanceResult, values: List[float], pairs, left_track, right_track, settings, warnings):
+    raw = np.asarray(values, dtype=np.float32)
+    filt = _filter(raw, settings.advanced.outlier_rejection_strength)
+    result.values_px = [float(v) for v in filt]
+    result.boundary_pairs = pairs
+    result.valid_count = int(filt.size)
+    min_count = max(3, int(settings.advanced.minimum_valid_line_count))
     if result.valid_count < min_count:
-        result.confidence = 0.0
         result.status = "Fail"
+        result.warning_message = "; ".join(warnings + ["valid distance count below minimum"])
         return result
-    result.mean_px = float(np.mean(filtered)); result.max_px = float(np.max(filtered)); result.min_px = float(np.min(filtered)); result.median_px = float(np.median(filtered)); result.std_px = float(np.std(filtered))
-    result.selected_px = result.max_px if settings.distance_method == "max" else result.min_px if settings.distance_method == "min" else result.mean_px
+    result.mean_px = float(np.mean(filt)); result.max_px = float(np.max(filt)); result.min_px = float(np.min(filt)); result.median_px = float(np.median(filt)); result.std_px = float(np.std(filt))
     result.selected_method = settings.distance_method
-    result.confidence = distance_confidence(filtered, result.valid_count, result.total_count, min_count, float(settings.advanced.min_valid_line_ratio))
-    result.status = _status_by_threshold(result.confidence, settings.advanced.confidence_threshold)
+    result.selected_px = result.max_px if settings.distance_method == "max" else result.min_px if settings.distance_method == "min" else result.mean_px
+    coverage = min(left_track.coverage, right_track.coverage)
+    std_penalty = 1.0 / (1.0 + result.std_px)
+    variation = float(np.std(raw - np.median(raw))) if raw.size else 99.0
+    outlier_ratio = 0.0 if raw.size == 0 else max(0.0, 1.0 - filt.size / raw.size)
+    conf = 100.0 * (0.3 * coverage + 0.2 * min(left_track.smoothness, right_track.smoothness) + 0.15 * min(left_track.continuity, right_track.continuity) + 0.15 * std_penalty + 0.1 * (1.0 - min(1.0, outlier_ratio)) + 0.1 * (1.0 / (1.0 + variation)))
+    result.confidence = float(max(0.0, min(100.0, conf)))
+    result.status = _status(result.confidence, settings.advanced.confidence_threshold)
+    if outlier_ratio > 0.45:
+        warnings.append("too many outliers removed")
+    result.warning_message = "; ".join(warnings)
     return result
 
 
 def measure_horizontal_cd(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSettings) -> DistanceResult:
-    clean_roi = normalize_roi(roi, (gray.shape[1], gray.shape[0]))
-    result = DistanceResult(orientation="horizontal", selected_method=settings.distance_method)
-    if clean_roi is None:
-        result.warning_message = "ROI가 없거나 너무 작습니다"; return result
-    x1, y1, x2, y2 = clean_roi
-    crop = gray[y1:y2 + 1, x1:x2 + 1].astype(np.float32, copy=False)
-    y_indices = _sample_indices(crop.shape[0], settings.advanced.scan_line_count)
-    result.total_count = int(y_indices.size)
-    values: List[float] = []; pairs: List[Tuple[float, float, float]] = []
-    for ly in y_indices:
-        pair = _extract_pair(crop[ly, :], settings, "left", "right")
-        if pair is None:
-            continue
-        left_x, right_x = float(x1 + pair[0]), float(x1 + pair[1])
-        values.append(right_x - left_x)
-        pairs.append((float(y1 + ly), left_x, right_x))
-    return _finish(result, values, pairs, settings)
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    crop = gray[y1 : y2 + 1, x1 : x2 + 1].astype(np.float32, copy=False)
+    ys = _sample_indices(crop.shape[0], settings.advanced.scan_line_count)
+    result = DistanceResult(orientation="horizontal", selected_method=settings.distance_method, total_count=int(ys.size))
+    scan_bands = []
+    for i, ly in enumerate(ys):
+        bands = extract_edge_bands(crop[ly, :], i, float(y1 + ly), float(x1), settings)
+        scan_bands.append(bands)
+    left = build_boundary_track(scan_bands, "left", settings.edge_reference, settings)
+    right = build_boundary_track(scan_bands, "right", settings.edge_reference, settings)
+    warnings = []
+    if left is None:
+        warnings.append("left boundary track not found")
+    if right is None:
+        warnings.append("right boundary track not found")
+    if left is None or right is None:
+        result.warning_message = "; ".join(warnings)
+        return result
+    grid = np.unique(np.concatenate([np.array([p[0] for p in left.points]), np.array([p[0] for p in right.points])]))
+    lvals = interpolate_track(left, grid)
+    rvals = interpolate_track(right, grid)
+    valid = np.isfinite(lvals) & np.isfinite(rvals) & ((rvals - lvals) > 0.5)
+    pairs = [(float(y1 + ys[int(g)]), float(x1 + lvals[i]), float(x1 + rvals[i])) for i, g in enumerate(grid[valid])]
+    values = [p[2] - p[1] for p in pairs]
+    return _finalize(result, values, pairs, left, right, settings, warnings)
 
 
 def measure_vertical_thk(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSettings) -> DistanceResult:
-    clean_roi = normalize_roi(roi, (gray.shape[1], gray.shape[0]))
-    result = DistanceResult(orientation="vertical", selected_method=settings.distance_method)
-    if clean_roi is None:
-        result.warning_message = "ROI가 없거나 너무 작습니다"; return result
-    x1, y1, x2, y2 = clean_roi
-    crop = gray[y1:y2 + 1, x1:x2 + 1].astype(np.float32, copy=False)
-    x_indices = _sample_indices(crop.shape[1], settings.advanced.scan_line_count)
-    result.total_count = int(x_indices.size)
-    values: List[float] = []; pairs: List[Tuple[float, float, float]] = []
-    for lx in x_indices:
-        pair = _extract_pair(crop[:, lx], settings, "top", "bottom")
-        if pair is None:
-            continue
-        top_y, bottom_y = float(y1 + pair[0]), float(y1 + pair[1])
-        values.append(bottom_y - top_y)
-        pairs.append((float(x1 + lx), top_y, bottom_y))
-    return _finish(result, values, pairs, settings)
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    crop = gray[y1 : y2 + 1, x1 : x2 + 1].astype(np.float32, copy=False)
+    xs = _sample_indices(crop.shape[1], settings.advanced.scan_line_count)
+    result = DistanceResult(orientation="vertical", selected_method=settings.distance_method, total_count=int(xs.size))
+    scan_bands = []
+    for i, lx in enumerate(xs):
+        bands = extract_edge_bands(crop[:, lx], i, float(x1 + lx), float(y1), settings)
+        scan_bands.append(bands)
+    top = build_boundary_track(scan_bands, "top", settings.edge_reference, settings)
+    bottom = build_boundary_track(scan_bands, "bottom", settings.edge_reference, settings)
+    warnings = []
+    if top is None:
+        warnings.append("top boundary track not found")
+    if bottom is None:
+        warnings.append("bottom boundary track not found")
+    if top is None or bottom is None:
+        result.warning_message = "; ".join(warnings)
+        return result
+    grid = np.unique(np.concatenate([np.array([p[0] for p in top.points]), np.array([p[0] for p in bottom.points])]))
+    tvals = interpolate_track(top, grid)
+    bvals = interpolate_track(bottom, grid)
+    valid = np.isfinite(tvals) & np.isfinite(bvals) & ((bvals - tvals) > 0.5)
+    pairs = [(float(x1 + xs[int(g)]), float(y1 + tvals[i]), float(y1 + bvals[i])) for i, g in enumerate(grid[valid])]
+    values = [p[2] - p[1] for p in pairs]
+    return _finalize(result, values, pairs, top, bottom, settings, warnings)
