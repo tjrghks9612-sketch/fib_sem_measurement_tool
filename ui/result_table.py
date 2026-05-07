@@ -10,16 +10,16 @@ from fib_sem_measurement_tool.models.settings import MEASUREMENT_TYPES, Measurem
 
 class ResultTable(ctk.CTkFrame):
     COLUMNS = [
-        ("File", 190),
-        ("Mode", 130),
+        ("파일", 190),
+        ("모드", 130),
         ("ROI", 140),
-        ("Value", 120),
-        ("Unit", 56),
-        ("Raw Edges", 82),
-        ("Coverage", 78),
-        ("Selected", 76),
-        ("Threshold", 76),
-        ("Status", 98),
+        ("값", 120),
+        ("단위", 56),
+        ("원시 경계", 82),
+        ("신뢰도", 78),
+        ("선택", 76),
+        ("임계값", 76),
+        ("상태", 98),
     ]
 
     def __init__(self, master, **kwargs):
@@ -29,7 +29,7 @@ class ResultTable(ctk.CTkFrame):
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(header, text="Results", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        ctk.CTkLabel(header, text="결과", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
 
         table_header = ctk.CTkFrame(self, fg_color="#0a121b", corner_radius=4)
         table_header.pack(fill="x", padx=10, pady=(0, 2))
@@ -46,7 +46,7 @@ class ResultTable(ctk.CTkFrame):
         for child in self.rows.winfo_children():
             child.destroy()
         if not items:
-            ctk.CTkLabel(self.rows, text="No images loaded.", text_color="#8293a6").pack(fill="x", pady=18)
+            ctk.CTkLabel(self.rows, text="불러온 이미지가 없습니다.", text_color="#8293a6").pack(fill="x", pady=18)
             return
         for row_index, item in enumerate(items):
             self._row(row_index, item, resolve_settings(item))
@@ -66,7 +66,7 @@ class ResultTable(ctk.CTkFrame):
         roi = "-" if settings.roi is None else f"{settings.roi[0]},{settings.roi[1]},{settings.roi[2]},{settings.roi[3]}"
         mode = MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type)
         if result is None:
-            return [item.file_name, mode, roi, "-", settings.calibration.unit, "-", "-", "-", f"{settings.minimum_grayscale_delta:.0f}", "Not measured"]
+            return [item.file_name, mode, roi, "-", settings.calibration.unit, "-", "-", "-", f"{settings.minimum_grayscale_delta:.0f}", "측정 전"]
 
         value = "-"
         if result.horizontal_cd and result.horizontal_cd.selected_px is not None:
@@ -90,17 +90,26 @@ class ResultTable(ctk.CTkFrame):
             f"{result.overall_confidence:.0f}%",
             str(result.selected_point_count()),
             f"{settings.minimum_grayscale_delta:.0f}",
-            result.status,
+            self._status_label(result.status),
         ]
+
+    def _status_label(self, status: str) -> str:
+        return {
+            "OK": "정상",
+            "Check": "확인",
+            "Review Needed": "검토 필요",
+            "Fail": "실패",
+            "Not measured": "측정 전",
+        }.get(status, status)
 
     def _value_color(self, col: int, value: str) -> str:
         if col == 9:
             return {
-                "OK": "#56f08a",
-                "Check": "#ffd452",
-                "Review Needed": "#ff9f43",
-                "Fail": "#ff5b69",
-                "Not measured": "#8293a6",
+                "정상": "#56f08a",
+                "확인": "#ffd452",
+                "검토 필요": "#ff9f43",
+                "실패": "#ff5b69",
+                "측정 전": "#8293a6",
             }.get(value, "#dbe7f2")
         if col in {3, 5, 6, 7, 8}:
             return "#f4f8fb"

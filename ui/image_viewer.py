@@ -25,10 +25,10 @@ class ImageViewer(ctk.CTkFrame):
         self.on_overlay_toggled = on_overlay_toggled
         self.on_hover_profile = on_hover_profile
 
-        self.title_var = tk.StringVar(value="Image Viewer")
-        self.meta_var = tk.StringVar(value="Load images to begin.")
+        self.title_var = tk.StringVar(value="이미지 뷰어")
+        self.meta_var = tk.StringVar(value="이미지를 불러오세요.")
         self.status_var = tk.StringVar(value="")
-        self.zoom_var = tk.StringVar(value="Fit")
+        self.zoom_var = tk.StringVar(value="맞춤")
         self.mode_var = tk.StringVar(value="roi")
         self.overlay_enabled = True
 
@@ -71,19 +71,19 @@ class ImageViewer(ctk.CTkFrame):
         controls = ctk.CTkFrame(self, fg_color="#0a121b")
         controls.pack(fill="x", padx=12, pady=(0, 10))
         ctk.CTkButton(controls, text="ROI", width=54, command=lambda: self.set_mode("roi")).pack(side="left", padx=(8, 4), pady=8)
-        ctk.CTkButton(controls, text="Cal Line", width=78, fg_color="#203246", command=lambda: self.set_mode("calibration")).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(controls, text="캘리브레이션 선", width=108, fg_color="#203246", command=lambda: self.set_mode("calibration")).pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="-", width=38, fg_color="#142234", command=self.zoom_out).pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="+", width=38, fg_color="#142234", command=self.zoom_in).pack(side="left", padx=4, pady=8)
-        ctk.CTkButton(controls, text="Fit", width=54, fg_color="#142234", command=self.fit).pack(side="left", padx=4, pady=8)
+        ctk.CTkButton(controls, text="맞춤", width=54, fg_color="#142234", command=self.fit).pack(side="left", padx=4, pady=8)
         ctk.CTkLabel(controls, textvariable=self.zoom_var, width=70).pack(side="left", padx=(8, 4))
-        self.overlay_switch = ctk.CTkSwitch(controls, text="Overlay", command=self._toggle_overlay)
+        self.overlay_switch = ctk.CTkSwitch(controls, text="오버레이", command=self._toggle_overlay)
         self.overlay_switch.select()
         self.overlay_switch.pack(side="right", padx=10, pady=8)
 
     def set_mode(self, mode: str) -> None:
         self.mode_var.set(mode)
         self.canvas.configure(cursor="tcross" if mode == "calibration" else "crosshair")
-        self.status_var.set("Calibration line mode" if mode == "calibration" else self.status_var.get())
+        self.status_var.set("캘리브레이션 선 모드" if mode == "calibration" else self.status_var.get())
 
     def set_content(self, image_bgr, render_bgr, title: str, meta: str, status: str) -> None:
         image_id = (id(image_bgr), image_bgr.shape if image_bgr is not None else None)
@@ -104,8 +104,8 @@ class ImageViewer(ctk.CTkFrame):
         self._canvas_image_item = None
         self._last_render_state = None
         self._last_hover_xy = (None, None)
-        self.title_var.set("Image Viewer")
-        self.meta_var.set("Load images to begin.")
+        self.title_var.set("이미지 뷰어")
+        self.meta_var.set("이미지를 불러오세요.")
         self.status_var.set("")
 
     def _toggle_overlay(self) -> None:
@@ -159,7 +159,7 @@ class ImageViewer(ctk.CTkFrame):
             self.canvas.coords(self._canvas_image_item, self.offset_x, self.offset_y)
             self.canvas.itemconfig(self._canvas_image_item, image=self.tk_image)
         if self.fit_mode:
-            self.zoom_var.set("Fit")
+            self.zoom_var.set("맞춤")
         else:
             self.zoom_var.set(f"{self.scale * 100:.0f}%")
 

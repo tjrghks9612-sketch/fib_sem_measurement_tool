@@ -13,7 +13,7 @@ from fib_sem_measurement_tool.models.result import (
     RawEdgeCandidate,
     TaperSideResult,
 )
-from fib_sem_measurement_tool.models.settings import MeasurementSettings
+from fib_sem_measurement_tool.models.settings import MEASUREMENT_TYPES, MeasurementSettings
 
 
 Color = Tuple[int, int, int]
@@ -35,6 +35,8 @@ FAIL_COLOR: Color = (80, 105, 255)
 @lru_cache(maxsize=12)
 def _ui_font(size: int):
     candidates = [
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/malgunbd.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "arial.ttf",
@@ -203,7 +205,8 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
         if settings.show_labels:
             angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
             mid = (int(round((x1 + x2) / 2)), int(round((y1 + y2) / 2)))
-            _label(image, f"{taper.side.upper()} {angle:.1f} deg", (mid[0] + 8, mid[1]), color, scale=0.48)
+            side = "좌측" if taper.side == "left" else "우측"
+            _label(image, f"{side} {angle:.1f} deg", (mid[0] + 8, mid[1]), color, scale=0.48)
 
 
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings) -> None:
@@ -211,11 +214,11 @@ def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], setting
         return
     rows = [("ROI", ROI_COLOR)]
     if settings.show_raw_candidates:
-        rows.append(("Raw candidates", RAW_HORIZONTAL_COLOR))
+        rows.append(("원시 후보", RAW_HORIZONTAL_COLOR))
     if settings.show_selected_edges:
-        rows.append(("Selected edges", POINT_COLOR))
+        rows.append(("선택 경계", POINT_COLOR))
     if settings.show_fit_line and result and (result.left_taper or result.right_taper):
-        rows.append(("Fit line", TAPER_LEFT_COLOR))
+        rows.append(("피팅 선", TAPER_LEFT_COLOR))
 
     x = max(12, image.shape[1] - 220)
     y = 16
@@ -234,17 +237,23 @@ def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: Measur
     if not settings.show_labels:
         return
     status_color = THK_COLOR if result.status == "OK" else ROI_COLOR if result.status == "Check" else FAIL_COLOR
+    status_label = {
+        "OK": "정상",
+        "Check": "확인",
+        "Review Needed": "검토 필요",
+        "Fail": "실패",
+    }.get(result.status, result.status)
     lines = [
-        f"{result.status} / Coverage {result.overall_confidence:.0f}%",
-        settings.measurement_type,
-        f"Raw edges {result.raw_edge_count()} / Selected pts {result.selected_point_count()}",
+        f"{status_label} / 신뢰도 {result.overall_confidence:.0f}%",
+        MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type),
+        f"원시 경계 {result.raw_edge_count()} / 선택 포인트 {result.selected_point_count()}",
     ]
     if result.horizontal_cd and result.horizontal_cd.selected_px is not None:
         lines.append(f"CD {_format_value(result.horizontal_cd.selected_px, settings)}")
     if result.vertical_thk and result.vertical_thk.selected_px is not None:
         lines.append(f"THK {_format_value(result.vertical_thk.selected_px, settings)}")
     if result.avg_taper_angle is not None:
-        lines.append(f"AVG {result.avg_taper_angle:.1f} deg")
+        lines.append(f"평균 {result.avg_taper_angle:.1f} deg")
 
     x = 16
     y = 20
@@ -278,12 +287,12 @@ def draw_overlay(
         x1, y1, x2, y2 = [int(v) for v in scale_bar_bbox]
         cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
         if settings.show_labels:
-            _label(canvas, "scale bar", (x1, y1 - 8), (255, 255, 90), scale=0.48)
+            _label(canvas, "스케일바", (x1, y1 - 8), (255, 255, 90), scale=0.48)
     if calibration_line:
         x1, y1, x2, y2 = [int(v) for v in calibration_line]
         cv2.line(canvas, (x1, y1), (x2, y2), (70, 220, 255), 2, cv2.LINE_AA)
         if settings.show_labels:
-            _label(canvas, "cal line", (x1, y1 - 8), (70, 220, 255), scale=0.48)
+            _label(canvas, "캘리브레이션 선", (x1, y1 - 8), (70, 220, 255), scale=0.48)
 
     if result is not None:
         if settings.show_raw_candidates:

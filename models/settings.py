@@ -6,35 +6,35 @@ from typing import Any, Dict, Optional, Tuple
 
 
 MEASUREMENT_TYPES = {
-    "taper_single": "Single Taper",
-    "taper_double": "Double Taper",
-    "distance_horizontal": "Horizontal CD",
-    "distance_vertical": "Vertical THK",
-    "distance_both": "Horizontal + Vertical",
+    "taper_single": "단일 테이퍼",
+    "taper_double": "양측 테이퍼",
+    "distance_horizontal": "가로 CD",
+    "distance_vertical": "세로 THK",
+    "distance_both": "가로 + 세로",
 }
 
 MEASUREMENT_TYPE_BY_LABEL = {label: key for key, label in MEASUREMENT_TYPES.items()}
 
 DISTANCE_METHODS = {
-    "mean": "Mean",
-    "max": "Max",
-    "min": "Min",
+    "mean": "평균",
+    "max": "최대",
+    "min": "최소",
 }
 
 DISTANCE_METHOD_BY_LABEL = {label: key for key, label in DISTANCE_METHODS.items()}
 
 EDGE_SCAN_MODES = {
-    "auto": "Auto",
-    "outside_to_center": "Outside -> Center",
-    "center_to_outside": "Center -> Outside",
+    "auto": "자동",
+    "outside_to_center": "바깥쪽 -> 중심",
+    "center_to_outside": "중심 -> 바깥쪽",
 }
 
 EDGE_SCAN_MODE_BY_LABEL = {label: key for key, label in EDGE_SCAN_MODES.items()}
 
 MEASURE_DIRECTIONS = {
-    "horizontal": "Horizontal",
-    "vertical": "Vertical",
-    "both": "Horizontal + Vertical",
+    "horizontal": "가로",
+    "vertical": "세로",
+    "both": "가로 + 세로",
 }
 
 SETTINGS_SOURCES = (
