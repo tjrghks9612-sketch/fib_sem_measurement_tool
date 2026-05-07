@@ -84,13 +84,16 @@ def scan_raw_edge_candidates(
     crop = np.asarray(gray[y1 : y2 + 1, x1 : x2 + 1], dtype=np.float32)
     scanned_line_count = int(crop.shape[0] if orientation == "horizontal" else crop.shape[1])
     per_scanline_candidate_count: Dict[int, int] = {}
+    profiles_by_scanline: Dict[int, List[float]] = {}
     raw_candidates: List[RawEdgeCandidate] = []
 
     if orientation == "horizontal":
         for local_y in range(crop.shape[0]):
             scan_index = y1 + local_y
+            profile = crop[local_y, :]
+            profiles_by_scanline[int(scan_index)] = [float(value) for value in profile]
             candidates = detect_profile_candidates(
-                crop[local_y, :],
+                profile,
                 settings,
                 scan_axis="horizontal",
                 scan_index=scan_index,
@@ -102,8 +105,10 @@ def scan_raw_edge_candidates(
     else:
         for local_x in range(crop.shape[1]):
             scan_index = x1 + local_x
+            profile = crop[:, local_x]
+            profiles_by_scanline[int(scan_index)] = [float(value) for value in profile]
             candidates = detect_profile_candidates(
-                crop[:, local_x],
+                profile,
                 settings,
                 scan_axis="vertical",
                 scan_index=scan_index,
@@ -119,6 +124,7 @@ def scan_raw_edge_candidates(
         scanned_line_count=scanned_line_count,
         raw_edge_candidates=raw_candidates,
         per_scanline_candidate_count=per_scanline_candidate_count,
+        profiles_by_scanline=profiles_by_scanline,
         minimum_grayscale_delta=_minimum_delta(settings),
     )
 
@@ -307,6 +313,140 @@ def _pairs_from_boundary_candidates(
     return selected
 
 
+def _scanline_profile(scan_result: EdgeScanResult, scan_index: int) -> Optional[np.ndarray]:
+    profile = scan_result.profiles_by_scanline.get(int(scan_index))
+    if profile is None:
+        return None
+    data = np.asarray(profile, dtype=np.float32).reshape(-1)
+    if data.size < 2:
+        return None
+    return data
+
+
+def _median(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 0.0
+    return float(np.median(values.astype(np.float64, copy=False)))
+
+
+def _edge_window_size(profile_length: int) -> int:
+    return max(3, min(12, int(round(float(profile_length) * 0.04))))
+
+
+def _stable_region_score(
+    profile: np.ndarray,
+    first: RawEdgeCandidate,
+    second: RawEdgeCandidate,
+    minimum_delta: float,
+) -> Optional[tuple[float, float, float, float]]:
+    first_index = int(np.floor(first.position))
+    second_index = int(np.floor(second.position))
+    if first_index < 0 or second_index + 1 >= profile.size or second_index <= first_index:
+        return None
+
+    inside_start = first_index + 1
+    inside_end = second_index + 1
+    if inside_end <= inside_start:
+        return None
+
+    window = _edge_window_size(int(profile.size))
+    left_outer = profile[max(0, first_index - window + 1) : first_index + 1]
+    right_outer = profile[second_index + 1 : min(profile.size, second_index + 1 + window)]
+    inside = profile[inside_start:inside_end]
+    left_inner = profile[inside_start : min(inside_end, inside_start + window)]
+    right_inner = profile[max(inside_start, inside_end - window) : inside_end]
+    if left_outer.size == 0 or right_outer.size == 0 or left_inner.size == 0 or right_inner.size == 0:
+        return None
+
+    inside_level = _median(inside)
+    left_outer_level = _median(left_outer)
+    right_outer_level = _median(right_outer)
+    left_inner_level = _median(left_inner)
+    right_inner_level = _median(right_inner)
+
+    left_region_contrast = abs(inside_level - left_outer_level)
+    right_region_contrast = abs(right_outer_level - inside_level)
+    left_edge_contrast = abs(left_inner_level - left_outer_level)
+    right_edge_contrast = abs(right_outer_level - right_inner_level)
+    supported_contrast = min(
+        left_region_contrast,
+        right_region_contrast,
+        left_edge_contrast,
+        right_edge_contrast,
+    )
+    if supported_contrast < max(1.0, float(minimum_delta) * 0.5):
+        return None
+
+    local_inconsistency = abs(left_inner_level - inside_level) + abs(right_inner_level - inside_level)
+    inside_mad = _median(np.abs(inside.astype(np.float64, copy=False) - inside_level))
+    edge_strength = min(float(first.strength), float(second.strength))
+    distance = float(second.position - first.position)
+    balance_penalty = abs(left_region_contrast - right_region_contrast) * 0.15
+
+    score = (
+        distance * 3.0
+        + supported_contrast
+        + edge_strength * 0.15
+        - local_inconsistency * 2.0
+        - inside_mad * 0.15
+        - balance_penalty
+    )
+    return score, distance, supported_contrast, edge_strength
+
+
+def _best_stable_region_pair(
+    scan_result: EdgeScanResult,
+    scan_index: int,
+    first_candidates: Sequence[RawEdgeCandidate],
+    second_candidates: Sequence[RawEdgeCandidate],
+) -> Optional[PairCandidate]:
+    profile = _scanline_profile(scan_result, scan_index)
+    if profile is None:
+        return None
+
+    best_key: Optional[tuple[float, float, float, float]] = None
+    best_pair: Optional[PairCandidate] = None
+    for first in first_candidates:
+        for second in second_candidates:
+            if second.position <= first.position:
+                continue
+            key = _stable_region_score(profile, first, second, scan_result.minimum_grayscale_delta)
+            if key is None:
+                continue
+            if best_key is None or key > best_key:
+                best_key = key
+                best_pair = PairCandidate(
+                    scan_axis=scan_result.scan_axis,
+                    scan_index=int(scan_index),
+                    local_scan_index=int(first.local_scan_index),
+                    first=first,
+                    second=second,
+                )
+    return best_pair
+
+
+def select_stable_region_pairs_per_scanline(
+    scan_result: EdgeScanResult,
+    first_direction: Optional[str] = None,
+    second_direction: Optional[str] = None,
+) -> List[PairCandidate]:
+    midpoint = float(_scan_profile_length(scan_result) - 1) / 2.0
+    selected_pairs: List[PairCandidate] = []
+    for scan_index, candidates in _group_by_scanline(scan_result.raw_edge_candidates).items():
+        first_candidates = _side_pool(candidates, midpoint, "first")
+        second_candidates = _side_pool(candidates, midpoint, "second")
+        pair = _best_stable_region_pair(scan_result, scan_index, first_candidates, second_candidates)
+        if pair is not None:
+            selected_pairs.append(pair)
+
+    if not selected_pairs and not scan_result.profiles_by_scanline:
+        return select_first_valid_boundary_pairs_per_scanline(scan_result, first_direction, second_direction)
+
+    first = filter_boundary_candidates_by_continuity([pair.first for pair in selected_pairs])
+    second = filter_boundary_candidates_by_continuity([pair.second for pair in selected_pairs])
+    return _pairs_from_boundary_candidates(scan_result, first, second)
+
+
 def select_first_valid_boundary_pairs_per_scanline(
     scan_result: EdgeScanResult,
     first_direction: Optional[str] = None,
@@ -322,4 +462,4 @@ def select_first_valid_boundary_pairs_per_scanline(
 
 
 def select_refined_side_pair_per_scanline(scan_result: EdgeScanResult) -> List[PairCandidate]:
-    return select_first_valid_boundary_pairs_per_scanline(scan_result)
+    return select_stable_region_pairs_per_scanline(scan_result)

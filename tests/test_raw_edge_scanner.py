@@ -165,7 +165,7 @@ class RawEdgeScannerTest(unittest.TestCase):
         self.assertGreater(len(pairs), scan.scanned_line_count)
         self.assertTrue(all(pair.first.position < pair.second.position for pair in pairs))
 
-    def test_refined_pair_selection_uses_first_valid_candidate_in_each_half(self) -> None:
+    def test_refined_pair_selection_prefers_stable_bounded_region(self) -> None:
         settings = make_settings()
         image = np.asarray(
             [
@@ -179,8 +179,8 @@ class RawEdgeScannerTest(unittest.TestCase):
         selected = select_refined_side_pair_per_scanline(scan)
 
         self.assertEqual(len(selected), 2)
-        self.assertEqual([pair.first.position for pair in selected], [0.5, 0.5])
-        self.assertEqual([pair.second.position for pair in selected], [8.5, 8.5])
+        self.assertEqual([pair.first.position for pair in selected], [3.5, 3.5])
+        self.assertEqual([pair.second.position for pair in selected], [6.5, 6.5])
 
     def test_first_valid_pair_selection_supports_inside_out_directions(self) -> None:
         settings = make_settings()

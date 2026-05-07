@@ -7,7 +7,7 @@ import numpy as np
 from fib_sem_measurement_tool.core.grayscale_line_scan import (
     scan_pair_candidates,
     scan_raw_edge_candidates,
-    select_first_valid_boundary_pairs_per_scanline,
+    select_stable_region_pairs_per_scanline,
 )
 from fib_sem_measurement_tool.models.result import DistanceResult, PairCandidate
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
@@ -108,7 +108,7 @@ def _measure_distance(
     scan = scan_raw_edge_candidates(gray, roi, orientation, settings)
     pair_candidates = scan_pair_candidates(scan)
     first_direction, second_direction = _edge_scan_directions(orientation, settings)
-    selected_pairs = select_first_valid_boundary_pairs_per_scanline(scan, first_direction, second_direction)
+    selected_pairs = select_stable_region_pairs_per_scanline(scan, first_direction, second_direction)
 
     result = DistanceResult(
         orientation=orientation,
