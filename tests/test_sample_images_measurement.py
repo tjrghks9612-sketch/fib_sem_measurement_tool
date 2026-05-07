@@ -89,3 +89,35 @@ class SampleImageMeasurementTest(unittest.TestCase):
         self.assertLessEqual(double_result.right_taper.angle_vertical, 12.0)
         self.assertGreaterEqual(double_result.left_taper.selected_point_count, 100)
         self.assertGreaterEqual(double_result.right_taper.selected_point_count, 100)
+
+    def test_sample_measurements_remain_stable_with_normalized_denoised_profiles(self) -> None:
+        cd = settings_for("distance_horizontal", (300, 150, 720, 610))
+        cd.normalize_grayscale_profiles = True
+        cd.denoise_grayscale_profiles = True
+        cd_result = run_measurement(load_sample("CD_sample_02_raw_pillar_gap.png"), cd)
+        self.assertIsNotNone(cd_result.horizontal_cd)
+        self.assertEqual(cd_result.horizontal_cd.status, "OK")
+        self.assertGreaterEqual(cd_result.horizontal_cd.selected_px, 260.0)
+        self.assertLessEqual(cd_result.horizontal_cd.selected_px, 285.0)
+
+        thk = settings_for("distance_vertical", (0, 250, 1023, 500))
+        thk.normalize_grayscale_profiles = True
+        thk.denoise_grayscale_profiles = True
+        thk_result = run_measurement(load_sample("THK_sample_02_raw_thin_layer.png"), thk)
+        self.assertIsNotNone(thk_result.vertical_thk)
+        self.assertEqual(thk_result.vertical_thk.status, "OK")
+        self.assertGreaterEqual(thk_result.vertical_thk.selected_px, 88.0)
+        self.assertLessEqual(thk_result.vertical_thk.selected_px, 100.0)
+
+        taper = settings_for("taper_double", (260, 145, 760, 610))
+        taper.normalize_grayscale_profiles = True
+        taper.denoise_grayscale_profiles = True
+        taper_result = run_measurement(load_sample("Taper_sample_02_raw_double_side.png"), taper)
+        self.assertIsNotNone(taper_result.left_taper)
+        self.assertIsNotNone(taper_result.right_taper)
+        self.assertEqual(taper_result.left_taper.status, "OK")
+        self.assertEqual(taper_result.right_taper.status, "OK")
+        self.assertGreaterEqual(taper_result.left_taper.angle_vertical, 3.5)
+        self.assertLessEqual(taper_result.left_taper.angle_vertical, 7.0)
+        self.assertGreaterEqual(taper_result.right_taper.angle_vertical, 7.0)
+        self.assertLessEqual(taper_result.right_taper.angle_vertical, 12.0)

@@ -9,6 +9,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
     scan_raw_edge_candidates,
     select_density_layer_pairs_per_scanline,
     select_first_valid_boundary_pairs_per_scanline,
+    select_projection_layer_pairs_per_scanline,
     select_stable_region_pairs_per_scanline,
 )
 from fib_sem_measurement_tool.models.result import DistanceResult, MeasurementResult, PairCandidate
@@ -124,7 +125,9 @@ def _measure_distance(
             max_jump_px=max_jump_px,
         )
     elif orientation == "vertical":
-        selected_pairs = select_density_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
+        selected_pairs = select_projection_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
+        if not selected_pairs:
+            selected_pairs = select_density_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
     if not selected_pairs:
         selected_pairs = select_stable_region_pairs_per_scanline(
             scan,
