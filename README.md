@@ -2,7 +2,7 @@
 
 Desktop FIB/SEM metrology tool for measuring CD, THK, single taper, and double taper inside an ROI.
 
-The current measurement pipeline is a raw grayscale edge candidate scanner. It is designed to expose every grayscale jump candidate in the ROI, not to hide candidates behind smoothing, denoising, or confidence heuristics.
+The current measurement pipeline is a Sobel-gradient boundary scanner. It preserves raw debug candidates while selecting local peak edges and smoothing selected boundary curves for more stable CD, THK, and taper measurement.
 
 ## Run
 
@@ -19,31 +19,33 @@ python fib_sem_measurement_tool\main.py
 
 ## Measurement Algorithm
 
-The measurement path is intentionally simple:
+The measurement path is:
 
 1. Input image
 2. Convert to grayscale with `to_gray(image)`
 3. Pass raw grayscale directly into measurement functions
 4. Scan every row or every column inside the ROI
-5. Emit raw edge candidates from direct adjacent grayscale differences
+5. Calculate a direction-specific Sobel gradient (`dx=1` for horizontal scans, `dy=1` for vertical scans)
+6. Emit only local peak edge candidates that meet `minimum_grayscale_delta`
+7. Repair selected boundary jumps, fill small NaN gaps, and smooth selected curves with a NaN-aware moving average
 
-No preprocessing is applied to CD, THK, or taper measurement. The measurement path does not use Gaussian blur, median blur, moving-average smoothing, profile smoothing, morphology, Canny, Sobel, threshold images, or image enhancement.
+No threshold image, morphology, Canny, or image enhancement is applied to CD, THK, or taper measurement.
 
 ## Raw Edge Candidate Definition
 
-For each 1D grayscale profile:
+For each 1D grayscale profile, candidates come from the matching Sobel gradient profile. The Sobel output is normalized back to grayscale-delta units so existing threshold values remain interpretable:
 
 ```python
 data = np.asarray(profile, dtype=np.float32)
-diff = data[1:] - data[:-1]
-strength = abs(diff)
-position = i + 0.5
+gradient = cv2.Sobel(..., ksize=3) / 4.0
+strength = abs(gradient)
+position = local_peak_transition + 0.5
 ```
 
 A candidate is emitted when:
 
 ```python
-abs(diff[i]) >= settings.minimum_grayscale_delta
+strength[local_peak] >= settings.minimum_grayscale_delta
 ```
 
 Each candidate stores scan axis, original image scanline index, ROI-local scanline index, subpixel edge position, image coordinate, strength, signed delta, sign, and grayscale values before/after the jump.
@@ -54,7 +56,8 @@ CD and THK are separated into two phases:
 
 1. Generate all raw edge candidates for every ROI row or column.
 2. Generate all same-scanline pair candidates for debug/export compatibility.
-3. Select boundary pairs from the first threshold-valid edge found in the configured scan direction for each side, with a small continuity refinement for selected overlay/measurement points.
+3. Select boundary pairs from Sobel local peaks, repair row/column jumps larger than `max_jump_px`, and post-process selected boundary curves with small-gap interpolation and NaN-aware moving average smoothing.
+4. For wide vertical THK scans, use horizontal edge-density clusters to select the intended top layer boundary and the next dense lower boundary before falling back to generic pair selection.
 
 The selected value remains available for compatibility, but the result also preserves:
 
@@ -74,7 +77,7 @@ For `distance_both`, the horizontal CD pass runs first. THK then scans every col
 
 Single and double taper no longer depend on CD/THK pair selection.
 
-Taper measurement first gathers every horizontal raw edge candidate inside the ROI. The left and right boundaries use the same direction-based first-valid selection as CD, followed by a small line-continuity refinement for the fit while preserving all raw candidates in the result and overlay.
+Taper measurement first gathers horizontal Sobel local peak candidates inside the ROI. The left and right boundaries scan from trench center toward the wall, then fitting is local to a configurable target height (`base_height_pct` plus side-specific offsets). After fitting, selected taper overlay points are filtered by `taper_residual_limit_px` so scratches and top/bottom artifacts do not dominate the displayed wall edge.
 
 ## UI
 

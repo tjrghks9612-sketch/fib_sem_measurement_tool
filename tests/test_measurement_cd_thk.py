@@ -122,7 +122,7 @@ class CdThkMeasurementTest(unittest.TestCase):
 
         result = measure_vertical_thk(image, settings.roi, settings)
 
-        self.assertEqual(result.values_px, [4.0, 4.0, 4.0, 6.0, 6.0])
+        np.testing.assert_allclose(result.values_px, [4.0, 4.0, 4.6666665, 5.3333335, 6.0], rtol=1e-6)
         self.assertAlmostEqual(result.selected_px, 4.8, delta=0.01)
         self.assertEqual(result.valid_count, 5)
 
@@ -146,6 +146,22 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertLess(result.vertical_thk.scanned_line_count, 120)
         self.assertGreaterEqual(min(pair.scan_index for pair in result.vertical_thk.selected_pairs), 43)
         self.assertLessEqual(max(pair.scan_index for pair in result.vertical_thk.selected_pairs), 76)
+
+    def test_distance_both_respects_measure_direction_setting(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 119, 99),
+            measurement_type="distance_both",
+            measure_direction="vertical",
+            minimum_grayscale_delta=30.0,
+        )
+        image = np.full((100, 120), 20, dtype=np.uint8)
+        image[30:70, 40:80] = 200
+
+        result = run_measurement(image, settings)
+
+        self.assertIsNone(result.horizontal_cd)
+        self.assertIsNotNone(result.vertical_thk)
+        self.assertAlmostEqual(result.vertical_thk.selected_px, 40.0, delta=1.0)
 
     def test_vertical_thk_matches_horizontal_cd_on_transposed_image(self) -> None:
         image = np.full((90, 130), 25, dtype=np.uint8)

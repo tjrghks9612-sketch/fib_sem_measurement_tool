@@ -23,6 +23,12 @@ DISTANCE_METHODS = {
 
 DISTANCE_METHOD_BY_LABEL = {label: key for key, label in DISTANCE_METHODS.items()}
 
+MEASURE_DIRECTIONS = {
+    "horizontal": "Horizontal",
+    "vertical": "Vertical",
+    "both": "Horizontal + Vertical",
+}
+
 SETTINGS_SOURCES = (
     "image_specific",
     "global_default",
@@ -46,11 +52,19 @@ class CalibrationSettings:
 @dataclass
 class MeasurementSettings:
     measurement_type: str = "distance_both"
+    measure_direction: str = "both"
     taper_side: str = "left"
     distance_method: str = "mean"
     minimum_grayscale_delta: float = 30.0
+    max_jump_px: float = 28.0
+    base_height_pct: float = 50.0
+    left_offset_pct: float = 0.0
+    right_offset_pct: float = 0.0
+    taper_residual_limit_px: float = 18.0
     cd_left_edge_direction: str = "left_to_center"
     cd_right_edge_direction: str = "right_to_center"
+    taper_left_edge_direction: str = "center_to_left"
+    taper_right_edge_direction: str = "center_to_right"
     thk_top_edge_direction: str = "top_to_bottom"
     thk_bottom_edge_direction: str = "bottom_to_top"
     roi: Optional[Tuple[int, int, int, int]] = None
