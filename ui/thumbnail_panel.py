@@ -9,8 +9,16 @@ from fib_sem_measurement_tool.models.image_item import ImageItem
 from fib_sem_measurement_tool.models.settings import MEASUREMENT_TYPES, MeasurementSettings
 
 
-ALL_TYPES = "All Types"
-ALL_STATUSES = "All Statuses"
+ALL_TYPES = "전체 유형"
+ALL_STATUSES = "전체 상태"
+STATUS_LABELS = {
+    "OK": "정상",
+    "Check": "확인",
+    "Review Needed": "검토 필요",
+    "Fail": "실패",
+    "Not measured": "측정 전",
+}
+STATUS_BY_LABEL = {label: status for status, label in STATUS_LABELS.items()}
 
 
 class ThumbnailPanel(ctk.CTkFrame):
@@ -32,14 +40,14 @@ class ThumbnailPanel(ctk.CTkFrame):
 
         self.type_filter = tk.StringVar(value=ALL_TYPES)
         self.status_filter = tk.StringVar(value=ALL_STATUSES)
-        self.count_var = tk.StringVar(value="0 images")
+        self.count_var = tk.StringVar(value="0개 이미지")
         self.selection_var = tk.StringVar(value="0 / 0")
         self._build()
 
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 4))
-        ctk.CTkLabel(header, text="Images / Results", font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
+        ctk.CTkLabel(header, text="이미지 / 결과", font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
         ctk.CTkLabel(header, textvariable=self.count_var, text_color="#90a2b4").pack(side="right")
 
         filters = ctk.CTkFrame(self, fg_color="transparent")
@@ -55,7 +63,7 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.status_menu = ctk.CTkOptionMenu(
             filters,
             variable=self.status_filter,
-            values=[ALL_STATUSES, "OK", "Check", "Review Needed", "Fail", "Not measured"],
+            values=[ALL_STATUSES] + list(STATUS_LABELS.values()),
             width=150,
             command=lambda _v: self._refresh_cards(),
         )
@@ -66,13 +74,13 @@ class ThumbnailPanel(ctk.CTkFrame):
 
         footer = ctk.CTkFrame(self, fg_color="#0a121b")
         footer.pack(fill="x", padx=10, pady=(0, 10))
-        ctk.CTkButton(footer, text="Select All", width=90, fg_color="#142234", command=self.select_all_visible).pack(
+        ctk.CTkButton(footer, text="전체 선택", width=90, fg_color="#142234", command=self.select_all_visible).pack(
             side="left", padx=6, pady=6
         )
-        ctk.CTkButton(footer, text="Clear", width=90, fg_color="#142234", command=self.clear_selection).pack(
+        ctk.CTkButton(footer, text="해제", width=90, fg_color="#142234", command=self.clear_selection).pack(
             side="left", padx=4, pady=6
         )
-        ctk.CTkLabel(footer, text="Selected").pack(side="left", padx=(14, 2))
+        ctk.CTkLabel(footer, text="선택").pack(side="left", padx=(14, 2))
         ctk.CTkLabel(footer, textvariable=self.selection_var, text_color="#48aaff").pack(side="left")
 
     def refresh(
@@ -92,7 +100,8 @@ class ThumbnailPanel(ctk.CTkFrame):
             return False
         status_filter = self.status_filter.get()
         status = item.result.status if item.result else "Not measured"
-        if status_filter != ALL_STATUSES and status != status_filter:
+        selected_status = STATUS_BY_LABEL.get(status_filter, status_filter)
+        if status_filter != ALL_STATUSES and status != selected_status:
             return False
         return True
 
@@ -109,7 +118,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             self.visible_indices.append(index)
             self._create_card(index, item, settings)
 
-        self.count_var.set(f"{len(self.visible_indices)} / {len(self.items)} images")
+        self.count_var.set(f"{len(self.visible_indices)} / {len(self.items)}개 이미지")
         selected_count = sum(1 for item in self.items if item.selected)
         self.selection_var.set(f"{selected_count} / {len(self.items)}")
 
@@ -143,7 +152,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             self.image_refs.append(image)
             thumb = ctk.CTkLabel(card, text="", image=image)
         else:
-            thumb = ctk.CTkLabel(card, text="No preview", width=124, height=80)
+            thumb = ctk.CTkLabel(card, text="미리보기 없음", width=124, height=80)
         thumb.grid(row=0, column=1, rowspan=5, padx=6, pady=8)
 
         number = ctk.CTkLabel(card, text=f"{index + 1:02d}", fg_color="#164c94", corner_radius=4, width=28)
@@ -152,16 +161,24 @@ class ThumbnailPanel(ctk.CTkFrame):
         name.grid(row=0, column=2, sticky="ew", padx=(36, 8), pady=(8, 0))
 
         type_text = MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type)
-        roi_text = "ROI OK" if settings.roi else "No ROI"
-        ctk.CTkLabel(card, text=f"{type_text} | {roi_text} | {settings.settings_source}", anchor="w", text_color="#c7d2df").grid(
+        roi_text = "ROI 있음" if settings.roi else "ROI 없음"
+        source_text = {
+            "global_default": "기본 설정",
+            "image_specific": "이미지별 설정",
+        }.get(settings.settings_source, settings.settings_source)
+        ctk.CTkLabel(card, text=f"{type_text} | {roi_text} | {source_text}", anchor="w", text_color="#c7d2df").grid(
             row=2, column=2, sticky="ew", padx=2
         )
-        ctk.CTkLabel(card, text=f"cal: {settings.calibration.status}", anchor="w", text_color="#8ea0b1").grid(
+        calibration_text = {
+            "not_calibrated": "미보정",
+            "calibrated": "보정됨",
+        }.get(settings.calibration.status, settings.calibration.status)
+        ctk.CTkLabel(card, text=f"캘리브레이션: {calibration_text}", anchor="w", text_color="#8ea0b1").grid(
             row=3, column=2, sticky="ew", padx=2
         )
 
         status = item.result.status if item.result else "Not measured"
-        summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else "Not measured"
+        summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else "측정 전"
         ctk.CTkLabel(card, text=summary, anchor="w", text_color=self._status_color(status)).grid(
             row=4, column=2, sticky="ew", padx=2, pady=(0, 8)
         )

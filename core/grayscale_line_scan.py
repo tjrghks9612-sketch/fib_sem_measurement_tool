@@ -65,6 +65,23 @@ def _prepare_detection_crop(crop: np.ndarray, orientation: str, settings: Measur
     return signal
 
 
+def prepare_display_profile_signal(
+    profile: Sequence[float],
+    orientation: str,
+    settings: MeasurementSettings,
+) -> np.ndarray:
+    data = np.asarray(profile, dtype=np.float32).reshape(-1)
+    if data.size == 0:
+        return data
+    if orientation == "horizontal":
+        crop = data.reshape(1, -1)
+    elif orientation == "vertical":
+        crop = data.reshape(-1, 1)
+    else:
+        raise ValueError(f"Unsupported profile orientation: {orientation}")
+    return _prepare_detection_crop(crop, orientation, settings).reshape(-1).astype(np.float32)
+
+
 def _minimum_delta(settings: MeasurementSettings) -> float:
     return max(0.0, float(getattr(settings, "minimum_grayscale_delta", 30.0)))
 

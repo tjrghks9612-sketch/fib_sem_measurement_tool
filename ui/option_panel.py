@@ -62,40 +62,40 @@ class OptionPanel(ctk.CTkFrame):
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkLabel(header, text="Inspector", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+        ctk.CTkLabel(header, text="검사 설정", font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
         ctk.CTkLabel(header, textvariable=self.status_var, text_color="#59d8ff").pack(side="right")
 
         self.body = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-        self._section_label("Measurement Settings")
-        self._combo_row("Mode", self.measurement_type_var, list(MEASUREMENT_TYPES.values()), lambda _v: self._changed())
-        self._radio_row("Taper Side", self.taper_side_var, [("Left", "left"), ("Right", "right")])
-        self._combo_row("Value", self.distance_method_var, list(DISTANCE_METHODS.values()), lambda _v: self._changed())
-        self._combo_row("Scan Start", self.edge_scan_mode_var, list(EDGE_SCAN_MODES.values()), lambda _v: self._changed())
-        self._switch_row("Normalize Signal", self.normalize_signal_var)
-        self._switch_row("Denoise Signal", self.denoise_signal_var)
+        self._section_label("측정 설정")
+        self._combo_row("측정 모드", self.measurement_type_var, list(MEASUREMENT_TYPES.values()), lambda _v: self._changed())
+        self._radio_row("테이퍼 측", self.taper_side_var, [("좌측", "left"), ("우측", "right")])
+        self._combo_row("대표값", self.distance_method_var, list(DISTANCE_METHODS.values()), lambda _v: self._changed())
+        self._combo_row("탐색 시작", self.edge_scan_mode_var, list(EDGE_SCAN_MODES.values()), lambda _v: self._changed())
+        self._switch_row("신호 정규화", self.normalize_signal_var)
+        self._switch_row("신호 스무딩", self.denoise_signal_var)
         self._value_row("ROI", self.roi_var)
-        row = self._row("Min Delta")
+        row = self._row("최소 변화량")
         self.delta_slider = ctk.CTkSlider(row, from_=1, to=255, command=self._delta_changed)
         self.delta_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         ctk.CTkLabel(row, textvariable=self.delta_var, width=46, anchor="e", text_color="#dbe7f2").grid(row=0, column=2, sticky="e")
 
-        self._section_label("Overlay Controls")
-        self._switch_row("Raw Candidates", self.show_raw_var)
-        self._switch_row("Selected Edges", self.show_selected_var)
-        self._switch_row("Fit Line", self.show_fit_var)
+        self._section_label("오버레이")
+        self._switch_row("원시 후보", self.show_raw_var)
+        self._switch_row("선택 경계", self.show_selected_var)
+        self._switch_row("피팅 선", self.show_fit_var)
         self._switch_row("ROI", self.show_roi_var)
-        self._switch_row("Labels", self.show_labels_var)
+        self._switch_row("라벨", self.show_labels_var)
 
-        self._section_label("Candidate Summary")
-        self._metric_row("Raw Edge Count", self.raw_edge_count_var)
-        self._metric_row("Coverage", self.coverage_var)
-        self._metric_row("Selected Points", self.selected_points_var)
-        self._metric_row("Pair Candidates", self.pair_count_var)
-        self._metric_row("Threshold", self.threshold_var)
+        self._section_label("후보 요약")
+        self._metric_row("원시 경계 수", self.raw_edge_count_var)
+        self._metric_row("신뢰도", self.coverage_var)
+        self._metric_row("선택 포인트", self.selected_points_var)
+        self._metric_row("쌍 후보", self.pair_count_var)
+        self._metric_row("임계값", self.threshold_var)
 
-        self._section_label("Selected Result")
+        self._section_label("선택 결과")
         ctk.CTkLabel(
             self.body,
             textvariable=self.selected_result_var,
@@ -105,12 +105,12 @@ class OptionPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=18, weight="bold"),
         ).pack(fill="x", pady=(0, 8))
 
-        self._section_label("Calibration")
-        ctk.CTkButton(self.body, text="Detect Scale Bar", command=self.on_detect_scale_bar, height=32).pack(fill="x", pady=(4, 6))
-        self._entry_row("Detected px", self.detected_px_var)
-        self._entry_row("Actual Length", self.actual_length_var)
-        self._combo_row("Unit", self.unit_var, ["nm", "um", "mm"], lambda _v: self._changed())
-        ctk.CTkButton(self.body, text="Apply Calibration", command=self.on_apply_calibration, height=32).pack(fill="x", pady=(6, 10))
+        self._section_label("캘리브레이션")
+        ctk.CTkButton(self.body, text="스케일바 검출", command=self.on_detect_scale_bar, height=32).pack(fill="x", pady=(4, 6))
+        self._entry_row("검출 px", self.detected_px_var)
+        self._entry_row("실제 길이", self.actual_length_var)
+        self._combo_row("단위", self.unit_var, ["nm", "um", "mm"], lambda _v: self._changed())
+        ctk.CTkButton(self.body, text="캘리브레이션 적용", command=self.on_apply_calibration, height=32).pack(fill="x", pady=(6, 10))
 
     def _section_label(self, text: str) -> None:
         ctk.CTkLabel(self.body, text=text, font=ctk.CTkFont(size=13, weight="bold"), anchor="w", text_color="#f2f6fa").pack(
@@ -224,7 +224,7 @@ class OptionPanel(ctk.CTkFrame):
         self.show_roi_var.set(bool(settings.show_roi))
         self.show_labels_var.set(bool(settings.show_labels))
         self.roi_var.set("-" if settings.roi is None else f"{settings.roi[0]}, {settings.roi[1]}, {settings.roi[2]}, {settings.roi[3]}")
-        self.threshold_var.set(f"{settings.minimum_grayscale_delta:.0f} gray")
+        self.threshold_var.set(f"{settings.minimum_grayscale_delta:.0f} 그레이")
         self._loading = False
 
     def set_candidate_summary(self, result: Optional[MeasurementResult], settings: MeasurementSettings) -> None:
@@ -233,8 +233,8 @@ class OptionPanel(ctk.CTkFrame):
             self.coverage_var.set("-")
             self.selected_points_var.set("-")
             self.pair_count_var.set("-")
-            self.selected_result_var.set("Not measured")
-            self.status_var.set(settings.settings_source)
+            self.selected_result_var.set("측정 전")
+            self.status_var.set(self._settings_source_label(settings.settings_source))
             return
 
         raw_edges = result.raw_edge_count()
@@ -248,8 +248,22 @@ class OptionPanel(ctk.CTkFrame):
         self.coverage_var.set(f"{result.overall_confidence:.0f}%")
         self.selected_points_var.set(str(selected_points))
         self.pair_count_var.set(str(pair_count))
-        self.status_var.set(result.status)
+        self.status_var.set(self._status_label(result.status))
         self.selected_result_var.set(self._selected_result_text(result, settings))
+
+    def _settings_source_label(self, source: str) -> str:
+        return {
+            "global_default": "기본 설정",
+            "image_specific": "이미지별 설정",
+        }.get(source, source)
+
+    def _status_label(self, status: str) -> str:
+        return {
+            "OK": "정상",
+            "Check": "확인",
+            "Review Needed": "검토 필요",
+            "Fail": "실패",
+        }.get(status, status)
 
     def _selected_result_text(self, result: MeasurementResult, settings: MeasurementSettings) -> str:
         unit = settings.calibration.unit
@@ -259,12 +273,12 @@ class OptionPanel(ctk.CTkFrame):
         if result.vertical_thk and result.vertical_thk.selected_px is not None:
             return f"THK {result.vertical_thk.selected_px * scale:.4g} {unit}"
         if result.avg_taper_angle is not None:
-            return f"Avg Taper {result.avg_taper_angle:.2f} deg"
+            return f"평균 테이퍼 {result.avg_taper_angle:.2f} deg"
         if result.left_taper and result.left_taper.angle_horizontal is not None:
-            return f"Left Taper {result.left_taper.angle_horizontal:.2f} deg"
+            return f"좌측 테이퍼 {result.left_taper.angle_horizontal:.2f} deg"
         if result.right_taper and result.right_taper.angle_horizontal is not None:
-            return f"Right Taper {result.right_taper.angle_horizontal:.2f} deg"
-        return "No selected result"
+            return f"우측 테이퍼 {result.right_taper.angle_horizontal:.2f} deg"
+        return "선택 결과 없음"
 
     def get_calibration_inputs(self):
         try:

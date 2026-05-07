@@ -166,10 +166,16 @@ class MeasurementResult:
             value = self.vertical_thk.selected_px * px_to_real
             chunks.append(f"THK {value:.3g} {unit}")
         if self.left_taper and self.left_taper.angle_horizontal is not None:
-            chunks.append(f"L {self.left_taper.angle_horizontal:.1f} deg")
+            chunks.append(f"좌 {self.left_taper.angle_horizontal:.1f} deg")
         if self.right_taper and self.right_taper.angle_horizontal is not None:
-            chunks.append(f"R {self.right_taper.angle_horizontal:.1f} deg")
-        chunks.append(f"{self.status} cov {self.overall_confidence:.0f}%")
+            chunks.append(f"우 {self.right_taper.angle_horizontal:.1f} deg")
+        status_label = {
+            "OK": "정상",
+            "Check": "확인",
+            "Review Needed": "검토 필요",
+            "Fail": "실패",
+        }.get(self.status, self.status)
+        chunks.append(f"{status_label} 신뢰도 {self.overall_confidence:.0f}%")
         return " | ".join(chunks)
 
     def raw_edge_count(self) -> int:

@@ -7,8 +7,10 @@ import cv2
 import customtkinter as ctk
 import numpy as np
 
+from fib_sem_measurement_tool.core.grayscale_line_scan import prepare_display_profile_signal
 from fib_sem_measurement_tool.core.profile_markers import collect_profile_edge_markers
 from fib_sem_measurement_tool.models.result import MeasurementResult
+from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
 
 MARKER_COLORS = {
@@ -21,13 +23,15 @@ MARKER_COLORS = {
 class ProfileGraph(ctk.CTkFrame):
     def __init__(self, master, **kwargs):
         super().__init__(master, fg_color="#0d1721", border_color="#223242", border_width=1, corner_radius=6, **kwargs)
-        self.mode_var = tk.StringVar(value="Both")
-        self.coord_var = tk.StringVar(value="Hover image to inspect grayscale profile")
+        self.mode_var = tk.StringVar(value="둘 다")
+        self.coord_var = tk.StringVar(value="이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
         self.gray: Optional[np.ndarray] = None
         self.result: Optional[MeasurementResult] = None
+        self.settings = MeasurementSettings()
         self.cursor: Optional[Tuple[int, int]] = None
         self._image_id = None
         self._result_id = None
+        self._settings_signature = None
         self._pending_cursor: Optional[Tuple[Optional[int], Optional[int]]] = None
         self._draw_after_id = None
         self._last_drawn_cursor: Optional[Tuple[int, int]] = None
@@ -36,11 +40,11 @@ class ProfileGraph(ctk.CTkFrame):
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(header, text="Grayscale Profile", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+        ctk.CTkLabel(header, text="그레이스케일 그래프", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
         ctk.CTkLabel(header, textvariable=self.coord_var, text_color="#90a2b4").pack(side="left", padx=12)
         self.mode = ctk.CTkSegmentedButton(
             header,
-            values=["Both", "Horizontal", "Vertical"],
+            values=["둘 다", "가로", "세로"],
             variable=self.mode_var,
             command=lambda _value: self._draw_graph(),
             width=220,
@@ -59,7 +63,7 @@ class ProfileGraph(ctk.CTkFrame):
             self._image_id = None
             self._result_id = None
             self._last_drawn_cursor = None
-            self.coord_var.set("No image")
+            self.coord_var.set("이미지 없음")
             self._draw_graph()
             return
         image_id = (id(image_bgr), image_bgr.shape)
@@ -72,7 +76,7 @@ class ProfileGraph(ctk.CTkFrame):
         self._image_id = image_id
         self.cursor = None
         self._last_drawn_cursor = None
-        self.coord_var.set("Hover image to inspect grayscale profile")
+        self.coord_var.set("이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
         self._draw_graph()
 
     def set_result(self, result: Optional[MeasurementResult]) -> None:
@@ -83,12 +87,28 @@ class ProfileGraph(ctk.CTkFrame):
         self._result_id = result_id
         self._draw_graph()
 
+    def set_settings(self, settings: MeasurementSettings) -> None:
+        signature = (
+            bool(getattr(settings, "normalize_grayscale_profiles", False)),
+            bool(getattr(settings, "denoise_grayscale_profiles", False)),
+            int(getattr(settings, "profile_denoise_window", 3)),
+            round(float(getattr(settings, "normalize_low_percentile", 2.0)), 4),
+            round(float(getattr(settings, "normalize_high_percentile", 98.0)), 4),
+            round(float(getattr(settings, "normalize_min_span", 12.0)), 4),
+        )
+        if signature == self._settings_signature:
+            return
+        self.settings = settings.clone()
+        self._settings_signature = signature
+        self._last_drawn_cursor = None
+        self._draw_graph()
+
     def clear_cursor(self) -> None:
         if self.cursor is None and self._pending_cursor == (None, None):
             return
         self.cursor = None
         self._last_drawn_cursor = None
-        self.coord_var.set("Hover image to inspect grayscale profile")
+        self.coord_var.set("이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
         self._draw_graph()
 
     def update_cursor(self, x: Optional[int], y: Optional[int]) -> None:
@@ -115,7 +135,13 @@ class ProfileGraph(ctk.CTkFrame):
             return
         self.cursor = (x, y)
         self._last_drawn_cursor = self.cursor
-        self.coord_var.set(f"x={x}, y={y}, gray={int(self.gray[y, x])}")
+        mode_text = []
+        if bool(getattr(self.settings, "normalize_grayscale_profiles", False)):
+            mode_text.append("정규화")
+        if bool(getattr(self.settings, "denoise_grayscale_profiles", False)):
+            mode_text.append("스무딩")
+        suffix = f" / 그래프: {'+'.join(mode_text)}" if mode_text else ""
+        self.coord_var.set(f"x={x}, y={y}, 원본={int(self.gray[y, x])}{suffix}")
         self._draw_graph()
 
     def _profile_points(self, profile: np.ndarray, width: int, height: int):
@@ -162,7 +188,17 @@ class ProfileGraph(ctk.CTkFrame):
         anchor = "nw" if x < width - 72 else "ne"
         text_x = x + 5 if anchor == "nw" else x - 5
         text_y = min(height - 20, max(10, y + (row % 3 - 1) * 16))
-        self.canvas.create_text(text_x, text_y, text=label, fill=color, anchor=anchor, font=("Arial", 8, "bold"))
+        self.canvas.create_text(text_x, text_y, text=self._marker_label(label), fill=color, anchor=anchor, font=("Arial", 8, "bold"))
+
+    def _marker_label(self, label: str) -> str:
+        return {
+            "CD L": "CD 좌",
+            "CD R": "CD 우",
+            "THK T": "THK 상",
+            "THK B": "THK 하",
+            "L taper": "좌 테이퍼",
+            "R taper": "우 테이퍼",
+        }.get(label, label)
 
     def _draw_edge_markers(self, axis: str, scan_index: int, profile: np.ndarray, width: int, height: int) -> None:
         for idx, marker in enumerate(collect_profile_edge_markers(self.result, axis, scan_index)):
@@ -179,23 +215,23 @@ class ProfileGraph(ctk.CTkFrame):
             self.canvas.create_text(4, y - 2, text=str(value), fill="#647487", anchor="sw", font=("Arial", 8))
 
         if self.gray is None:
-            self.canvas.create_text(width / 2, height / 2, text="Load an image", fill="#8293a6")
+            self.canvas.create_text(width / 2, height / 2, text="이미지를 불러오세요", fill="#8293a6")
             return
         if self.cursor is None:
-            self.canvas.create_text(width / 2, height / 2, text="Move mouse over main image", fill="#8293a6")
+            self.canvas.create_text(width / 2, height / 2, text="메인 이미지에 마우스를 올리세요", fill="#8293a6")
             return
 
         x, y = self.cursor
         mode = self.mode_var.get()
-        if mode in ("Both", "Horizontal"):
-            horizontal = self.gray[y, :]
+        if mode in ("둘 다", "가로"):
+            horizontal = prepare_display_profile_signal(self.gray[y, :], "horizontal", self.settings)
             step = max(1, int(len(horizontal) / max(width, 1)))
             self._draw_polyline(self._profile_points(horizontal, width, height), "#38a8ff", step)
             self._draw_edge_markers("horizontal", y, horizontal, width, height)
-            self.canvas.create_text(width - 8, 14, text="H", fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
-        if mode in ("Both", "Vertical"):
-            vertical = self.gray[:, x]
+            self.canvas.create_text(width - 8, 14, text="가로", fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
+        if mode in ("둘 다", "세로"):
+            vertical = prepare_display_profile_signal(self.gray[:, x], "vertical", self.settings)
             step = max(1, int(len(vertical) / max(width, 1)))
             self._draw_polyline(self._profile_points(vertical, width, height), "#61f27a", step)
             self._draw_edge_markers("vertical", x, vertical, width, height)
-            self.canvas.create_text(width - 8, 30, text="V", fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))
+            self.canvas.create_text(width - 8, 30, text="세로", fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))

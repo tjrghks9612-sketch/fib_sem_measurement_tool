@@ -2,7 +2,11 @@ import unittest
 
 import numpy as np
 
-from fib_sem_measurement_tool.core.grayscale_line_scan import detect_profile_candidates, scan_pair_candidates
+from fib_sem_measurement_tool.core.grayscale_line_scan import (
+    detect_profile_candidates,
+    prepare_display_profile_signal,
+    scan_pair_candidates,
+)
 from fib_sem_measurement_tool.core.measurement_cd_thk import measure_horizontal_cd, measure_vertical_thk
 from fib_sem_measurement_tool.core.measurement_taper import measure_single_taper
 from fib_sem_measurement_tool.models.result import EdgeScanResult
@@ -54,6 +58,20 @@ class GrayscaleLineScanTest(unittest.TestCase):
             len(detect_profile_candidates(strong, settings, "horizontal", 0, 0, (0, 0))),
             0,
         )
+
+    def test_display_profile_signal_applies_normalization_and_smoothing(self) -> None:
+        settings = make_settings()
+        settings.normalize_grayscale_profiles = True
+        settings.denoise_grayscale_profiles = True
+        settings.profile_denoise_window = 3
+        profile = np.asarray([80, 80, 80, 100, 80, 80, 80, 100, 100, 100], dtype=np.float32)
+
+        display = prepare_display_profile_signal(profile, "horizontal", settings)
+
+        self.assertEqual(display.shape, profile.shape)
+        self.assertGreaterEqual(float(np.min(display)), 0.0)
+        self.assertLessEqual(float(np.max(display)), 255.0)
+        self.assertLess(float(display[3]), 255.0)
 
     def test_cd_and_thk_use_same_line_scanner(self) -> None:
         settings = make_settings()
