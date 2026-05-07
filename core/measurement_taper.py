@@ -6,6 +6,7 @@ from typing import Sequence
 import numpy as np
 
 from fib_sem_measurement_tool.core.grayscale_line_scan import (
+    refine_boundary_candidates_by_line,
     scan_raw_edge_candidates,
     select_boundary_curve_candidates,
 )
@@ -18,6 +19,7 @@ MIN_COVERAGE_FOR_OK = 0.45
 TAPER_TARGET_WINDOW_PCT = 18.0
 TAPER_MIN_LOCAL_POINTS = 5
 TAPER_RESIDUAL_LIMIT_PX = 18.0
+TAPER_FIT_PREFILTER_RESIDUAL_PX = 6.0
 
 
 def _status_from_points(point_count: int, coverage: float) -> str:
@@ -95,6 +97,24 @@ def _fit_candidates_near_target(
     return [candidates[int(index)] for index in np.sort(indices)]
 
 
+def _prefilter_taper_fit_candidates(candidates: Sequence[RawEdgeCandidate]) -> list[RawEdgeCandidate]:
+    selected = list(candidates)
+    if len(selected) < TAPER_MIN_LOCAL_POINTS:
+        return selected
+
+    refined = refine_boundary_candidates_by_line(
+        selected,
+        residual_limit_px=TAPER_FIT_PREFILTER_RESIDUAL_PX,
+        mad_multiplier=2.5,
+        iterations=5,
+    )
+    if len(refined) < TAPER_MIN_LOCAL_POINTS:
+        return selected
+    if len(refined) < max(TAPER_MIN_LOCAL_POINTS, int(len(selected) * 0.35)):
+        return selected
+    return refined
+
+
 def _line_angles(x1: float, y1: float, x2: float, y2: float) -> tuple[float, float]:
     dx = float(x2 - x1)
     dy = float(y2 - y1)
@@ -128,7 +148,8 @@ def _fit_selected_boundary(
         return result
 
     target_y = _target_y_for_side(roi, result.side, settings)
-    fit_candidates = _fit_candidates_near_target(all_selected, target_y, roi)
+    fit_source_candidates = _prefilter_taper_fit_candidates(all_selected)
+    fit_candidates = _fit_candidates_near_target(fit_source_candidates, target_y, roi)
     fit_pts = np.asarray([(candidate.image_x, candidate.image_y) for candidate in fit_candidates], dtype=np.float64)
     result.fit_point_count = int(fit_pts.shape[0])
     result.valid_point_count = int(fit_pts.shape[0])

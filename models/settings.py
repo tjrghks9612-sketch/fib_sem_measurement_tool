@@ -70,6 +70,7 @@ class MeasurementSettings:
     normalize_low_percentile: float = 2.0
     normalize_high_percentile: float = 98.0
     normalize_min_span: float = 12.0
+    max_profile_candidates_per_scanline: int = 16
     minimum_grayscale_delta: float = 30.0
     max_jump_px: float = 28.0
     base_height_pct: float = 50.0

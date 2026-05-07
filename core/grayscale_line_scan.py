@@ -14,6 +14,8 @@ from fib_sem_measurement_tool.models.settings import MeasurementSettings
 SOBEL_KERNEL_SIZE = 3
 SOBEL_DELTA_SCALE = 4.0
 DEFAULT_MAX_JUMP_PX = 28.0
+DEFAULT_MAX_PROFILE_CANDIDATES_PER_SCANLINE = 16
+PROJECTION_PERCENTILE = 75.0
 
 
 def _robust_normalize_signal(data: np.ndarray, settings: MeasurementSettings) -> np.ndarray:
@@ -67,6 +69,19 @@ def _minimum_delta(settings: MeasurementSettings) -> float:
     return max(0.0, float(getattr(settings, "minimum_grayscale_delta", 30.0)))
 
 
+def _max_profile_candidates(settings: MeasurementSettings) -> int:
+    return max(
+        0,
+        int(
+            getattr(
+                settings,
+                "max_profile_candidates_per_scanline",
+                DEFAULT_MAX_PROFILE_CANDIDATES_PER_SCANLINE,
+            )
+        ),
+    )
+
+
 def _candidate_image_position(
     scan_axis: str,
     scan_index: int,
@@ -96,6 +111,17 @@ def _sobel_gradient_image(crop: np.ndarray, orientation: str) -> np.ndarray:
         return cv2.Sobel(crop, cv2.CV_32F, 1, 0, ksize=SOBEL_KERNEL_SIZE) / SOBEL_DELTA_SCALE
     if orientation == "vertical":
         return cv2.Sobel(crop, cv2.CV_32F, 0, 1, ksize=SOBEL_KERNEL_SIZE) / SOBEL_DELTA_SCALE
+    raise ValueError(f"Unsupported scan orientation: {orientation}")
+
+
+def _gradient_projection(gradient: np.ndarray, orientation: str) -> np.ndarray:
+    strength = np.abs(np.asarray(gradient, dtype=np.float32))
+    if strength.size == 0:
+        return np.asarray([], dtype=np.float64)
+    if orientation == "horizontal":
+        return np.percentile(strength, PROJECTION_PERCENTILE, axis=0).astype(np.float64)
+    if orientation == "vertical":
+        return np.percentile(strength, PROJECTION_PERCENTILE, axis=1).astype(np.float64)
     raise ValueError(f"Unsupported scan orientation: {orientation}")
 
 
@@ -234,6 +260,10 @@ def detect_profile_candidates(
                 grayscale_after=grayscale_after,
             )
         )
+    limit = _max_profile_candidates(settings)
+    if limit > 0 and len(candidates) > limit:
+        candidates = sorted(candidates, key=lambda candidate: candidate.strength, reverse=True)[:limit]
+        candidates.sort(key=lambda candidate: candidate.position)
     return candidates
 
 
@@ -250,6 +280,7 @@ def scan_raw_edge_candidates(
     crop = np.asarray(gray[y1 : y2 + 1, x1 : x2 + 1], dtype=np.float32)
     detection_crop = _prepare_detection_crop(crop, orientation, settings)
     gradient = _sobel_gradient_image(detection_crop, orientation)
+    gradient_projection = _gradient_projection(gradient, orientation)
     scanned_line_count = int(crop.shape[0] if orientation == "horizontal" else crop.shape[1])
     per_scanline_candidate_count: Dict[int, int] = {}
     profiles_by_scanline: Dict[int, List[float]] = {}
@@ -297,6 +328,7 @@ def scan_raw_edge_candidates(
         raw_edge_candidates=raw_candidates,
         per_scanline_candidate_count=per_scanline_candidate_count,
         profiles_by_scanline=profiles_by_scanline,
+        gradient_projection=[float(value) for value in gradient_projection],
         minimum_grayscale_delta=_minimum_delta(settings),
     )
 
@@ -784,6 +816,145 @@ def _candidate_near_cluster(
             -abs(float(candidate.position) - center),
         ),
     )
+
+
+def _smooth_1d(values: np.ndarray, window: int) -> np.ndarray:
+    if values.size == 0:
+        return values.astype(np.float64, copy=True)
+    win = max(1, int(window))
+    if win % 2 == 0:
+        win += 1
+    if win <= 1:
+        return values.astype(np.float64, copy=True)
+    return np.convolve(values.astype(np.float64, copy=False), np.ones(win, dtype=np.float64) / float(win), mode="same")
+
+
+def _projection_peak_clusters(
+    scan_result: EdgeScanResult,
+    max_peaks: int = 12,
+) -> List[dict[str, float]]:
+    projection = np.asarray(scan_result.gradient_projection, dtype=np.float64).reshape(-1)
+    profile_length = _scan_profile_length(scan_result)
+    if projection.size != profile_length or profile_length < 3:
+        return []
+
+    smooth_window = max(5, min(15, int(round(float(profile_length) * 0.03))))
+    if smooth_window % 2 == 0:
+        smooth_window += 1
+    smoothed = _smooth_1d(projection, smooth_window)
+    max_value = float(np.max(smoothed)) if smoothed.size else 0.0
+    if max_value <= 0.0:
+        return []
+
+    baseline = float(np.median(smoothed))
+    mad = float(np.median(np.abs(smoothed - baseline)))
+    threshold = max(baseline + 2.5 * 1.4826 * (mad + 1e-6), max_value * 0.25)
+    candidates: List[tuple[float, int]] = []
+    for idx in range(1, smoothed.size - 1):
+        value = float(smoothed[idx])
+        if value < threshold:
+            continue
+        if value > float(smoothed[idx - 1]) and value >= float(smoothed[idx + 1]):
+            candidates.append((value, idx))
+    if not candidates:
+        return []
+
+    min_peak_distance = max(6, int(round(float(profile_length) * 0.06)))
+    selected: List[tuple[float, int]] = []
+    for value, idx in sorted(candidates, key=lambda item: item[0], reverse=True):
+        if any(abs(idx - other_idx) < min_peak_distance for _other_value, other_idx in selected):
+            continue
+        selected.append((value, idx))
+        if len(selected) >= max_peaks:
+            break
+
+    half_width = max(2.0, float(min_peak_distance) / 2.0)
+    clusters = [
+        {
+            "start": max(0.0, float(idx) - half_width),
+            "end": min(float(profile_length - 1), float(idx) + half_width),
+            "center": float(idx),
+            "coverage": 1.0,
+            "median_strength": float(value),
+            "score": float(value),
+        }
+        for value, idx in selected
+    ]
+    return sorted(clusters, key=lambda cluster: cluster["center"])
+
+
+def _select_projection_layer_clusters(scan_result: EdgeScanResult) -> Optional[tuple[dict[str, float], dict[str, float]]]:
+    clusters = _projection_peak_clusters(scan_result)
+    if len(clusters) < 2:
+        return None
+
+    profile_length = _scan_profile_length(scan_result)
+    min_separation = max(12.0, float(profile_length) * 0.08)
+    best_pair: Optional[tuple[dict[str, float], dict[str, float]]] = None
+    best_score: Optional[tuple[float, float, float]] = None
+    for first, second in combinations(clusters, 2):
+        separation = float(second["center"]) - float(first["center"])
+        if separation < min_separation:
+            continue
+        first_score = float(first["score"])
+        second_score = float(second["score"])
+        score = (
+            min(first_score, second_score) * 3.0
+            + (first_score + second_score) * 0.25
+            + separation * 0.02
+        )
+        key = (score, min(first_score, second_score), -separation)
+        if best_score is None or key > best_score:
+            best_score = key
+            best_pair = (first, second)
+    return best_pair
+
+
+def select_projection_layer_pairs_per_scanline(
+    scan_result: EdgeScanResult,
+    max_jump_px: float = DEFAULT_MAX_JUMP_PX,
+    min_coverage: float = 0.45,
+) -> List[PairCandidate]:
+    if scan_result.scan_axis != "vertical" or scan_result.scanned_line_count < 128:
+        return []
+
+    cluster_pair = _select_projection_layer_clusters(scan_result)
+    if cluster_pair is None:
+        return []
+    first_cluster, second_cluster = cluster_pair
+
+    grouped = _group_by_scanline(scan_result.raw_edge_candidates)
+    profile_length = _scan_profile_length(scan_result)
+    cluster_margin = max(5.0, float(profile_length) * 0.03)
+    first_candidates: List[RawEdgeCandidate] = []
+    second_candidates: List[RawEdgeCandidate] = []
+    for scan_index in _scan_indices(scan_result):
+        candidates = grouped.get(int(scan_index), [])
+        first = _candidate_near_cluster(candidates, first_cluster, cluster_margin)
+        second = _candidate_near_cluster(candidates, second_cluster, cluster_margin)
+        if first is None or second is None or second.position <= first.position:
+            continue
+        first_candidates.append(first)
+        second_candidates.append(second)
+
+    selected_coverage = float(len(first_candidates) / scan_result.scanned_line_count) if scan_result.scanned_line_count else 0.0
+    if selected_coverage < float(min_coverage):
+        return []
+
+    max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
+    first = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(scan_result, first_candidates, "first", max_jump_px),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
+    )
+    second = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(scan_result, second_candidates, "second", max_jump_px),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
+    )
+    return _pairs_from_boundary_candidates(scan_result, first, second)
 
 
 def select_density_layer_pairs_per_scanline(

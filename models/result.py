@@ -48,6 +48,7 @@ class EdgeScanResult:
     raw_edge_candidates: List[RawEdgeCandidate] = field(default_factory=list)
     per_scanline_candidate_count: Dict[int, int] = field(default_factory=dict)
     profiles_by_scanline: Dict[int, List[float]] = field(default_factory=dict)
+    gradient_projection: List[float] = field(default_factory=list)
     minimum_grayscale_delta: float = 0.0
 
     @property
