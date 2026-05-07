@@ -79,6 +79,25 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(left_x, 19.5, delta=0.01)
         self.assertAlmostEqual(right_x, 119.5, delta=0.01)
 
+    def test_explicit_center_to_outside_scan_mode_measures_inner_boundaries(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 139, 19),
+            measurement_type="distance_horizontal",
+            minimum_grayscale_delta=30.0,
+            edge_scan_mode="center_to_outside",
+        )
+        image = np.full((20, 140), 20, dtype=np.uint8)
+        image[:, 20:120] = 80
+        image[:, 50:90] = 230
+
+        result = measure_horizontal_cd(image, settings.roi, settings)
+
+        self.assertIsNotNone(result.selected_px)
+        self.assertAlmostEqual(result.selected_px, 40.0, delta=1.0)
+        _, left_x, right_x = result.boundary_pairs[0]
+        self.assertAlmostEqual(left_x, 49.5, delta=0.01)
+        self.assertAlmostEqual(right_x, 89.5, delta=0.01)
+
     def test_horizontal_cd_ignores_single_column_noise_before_real_boundary(self) -> None:
         settings = MeasurementSettings(
             roi=(0, 0, 139, 19),

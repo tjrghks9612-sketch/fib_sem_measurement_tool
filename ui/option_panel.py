@@ -9,6 +9,8 @@ from fib_sem_measurement_tool.models.result import MeasurementResult
 from fib_sem_measurement_tool.models.settings import (
     DISTANCE_METHODS,
     DISTANCE_METHOD_BY_LABEL,
+    EDGE_SCAN_MODES,
+    EDGE_SCAN_MODE_BY_LABEL,
     MEASUREMENT_TYPES,
     MEASUREMENT_TYPE_BY_LABEL,
     MeasurementSettings,
@@ -33,6 +35,7 @@ class OptionPanel(ctk.CTkFrame):
         self.measurement_type_var = tk.StringVar(value=MEASUREMENT_TYPES["distance_both"])
         self.taper_side_var = tk.StringVar(value="left")
         self.distance_method_var = tk.StringVar(value=DISTANCE_METHODS["mean"])
+        self.edge_scan_mode_var = tk.StringVar(value=EDGE_SCAN_MODES["auto"])
         self.delta_var = tk.StringVar(value="30")
         self.detected_px_var = tk.StringVar(value="")
         self.actual_length_var = tk.StringVar(value="")
@@ -67,6 +70,7 @@ class OptionPanel(ctk.CTkFrame):
         self._combo_row("Mode", self.measurement_type_var, list(MEASUREMENT_TYPES.values()), lambda _v: self._changed())
         self._radio_row("Taper Side", self.taper_side_var, [("Left", "left"), ("Right", "right")])
         self._combo_row("Value", self.distance_method_var, list(DISTANCE_METHODS.values()), lambda _v: self._changed())
+        self._combo_row("Scan Start", self.edge_scan_mode_var, list(EDGE_SCAN_MODES.values()), lambda _v: self._changed())
         self._value_row("ROI", self.roi_var)
         row = self._row("Min Delta")
         self.delta_slider = ctk.CTkSlider(row, from_=1, to=255, command=self._delta_changed)
@@ -178,6 +182,7 @@ class OptionPanel(ctk.CTkFrame):
         settings.measurement_type = MEASUREMENT_TYPE_BY_LABEL.get(self.measurement_type_var.get(), "distance_both")
         settings.taper_side = self.taper_side_var.get()
         settings.distance_method = DISTANCE_METHOD_BY_LABEL.get(self.distance_method_var.get(), "mean")
+        settings.edge_scan_mode = EDGE_SCAN_MODE_BY_LABEL.get(self.edge_scan_mode_var.get(), "auto")
         settings.minimum_grayscale_delta = self._float(self.delta_var.get(), settings.minimum_grayscale_delta)
         settings.calibration.unit = self.unit_var.get()
         settings.show_raw_candidates = bool(self.show_raw_var.get())
@@ -192,6 +197,7 @@ class OptionPanel(ctk.CTkFrame):
         self.measurement_type_var.set(MEASUREMENT_TYPES.get(settings.measurement_type, MEASUREMENT_TYPES["distance_both"]))
         self.taper_side_var.set(settings.taper_side)
         self.distance_method_var.set(DISTANCE_METHODS.get(settings.distance_method, DISTANCE_METHODS["mean"]))
+        self.edge_scan_mode_var.set(EDGE_SCAN_MODES.get(getattr(settings, "edge_scan_mode", "auto"), EDGE_SCAN_MODES["auto"]))
         self.unit_var.set(settings.calibration.unit if settings.calibration.unit != "px" else "um")
         self.detected_px_var.set(
             "" if settings.calibration.detected_scale_bar_px is None else f"{settings.calibration.detected_scale_bar_px:.3f}"

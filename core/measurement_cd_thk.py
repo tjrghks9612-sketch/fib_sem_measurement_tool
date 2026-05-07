@@ -8,6 +8,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
     scan_pair_candidates,
     scan_raw_edge_candidates,
     select_density_layer_pairs_per_scanline,
+    select_first_valid_boundary_pairs_per_scanline,
     select_stable_region_pairs_per_scanline,
 )
 from fib_sem_measurement_tool.models.result import DistanceResult, MeasurementResult, PairCandidate
@@ -55,6 +56,9 @@ def _nearest_selected_pair(selected_pairs: Sequence[PairCandidate], selected_px:
 
 
 def _edge_scan_directions(orientation: str, settings: MeasurementSettings) -> tuple[str, str]:
+    edge_scan_mode = getattr(settings, "edge_scan_mode", "auto")
+    if edge_scan_mode in {"outside_to_center", "center_to_outside"}:
+        return edge_scan_mode, edge_scan_mode
     if orientation == "horizontal":
         return (
             getattr(settings, "cd_left_edge_direction", "left_to_center"),
@@ -111,7 +115,15 @@ def _measure_distance(
     first_direction, second_direction = _edge_scan_directions(orientation, settings)
     max_jump_px = float(getattr(settings, "max_jump_px", 28.0))
     selected_pairs = []
-    if orientation == "vertical":
+    edge_scan_mode = getattr(settings, "edge_scan_mode", "auto")
+    if edge_scan_mode in {"outside_to_center", "center_to_outside"}:
+        selected_pairs = select_first_valid_boundary_pairs_per_scanline(
+            scan,
+            first_direction,
+            second_direction,
+            max_jump_px=max_jump_px,
+        )
+    elif orientation == "vertical":
         selected_pairs = select_density_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
     if not selected_pairs:
         selected_pairs = select_stable_region_pairs_per_scanline(
