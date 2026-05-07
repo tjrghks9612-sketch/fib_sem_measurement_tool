@@ -7,13 +7,16 @@ import numpy as np
 from fib_sem_measurement_tool.core.grayscale_line_scan import (
     scan_pair_candidates,
     scan_raw_edge_candidates,
-    select_refined_side_pair_per_scanline,
+    select_first_valid_boundary_pairs_per_scanline,
 )
 from fib_sem_measurement_tool.models.result import DistanceResult, PairCandidate
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
 
 MIN_COVERAGE_FOR_OK = 0.45
+THK_CD_MARGIN_RATIO = 0.075
+THK_CD_MARGIN_MIN_PX = 3.0
+THK_CD_MARGIN_MAX_PX = 5.0
 
 
 def _status_from_candidates(selected_count: int, coverage: float) -> str:
@@ -50,6 +53,52 @@ def _nearest_selected_pair(selected_pairs: Sequence[PairCandidate], selected_px:
     return min(selected_pairs, key=lambda pair: abs(pair.distance - selected_px))
 
 
+def _edge_scan_directions(orientation: str, settings: MeasurementSettings) -> tuple[str, str]:
+    if orientation == "horizontal":
+        return (
+            getattr(settings, "cd_left_edge_direction", "left_to_center"),
+            getattr(settings, "cd_right_edge_direction", "right_to_center"),
+        )
+    if orientation == "vertical":
+        return (
+            getattr(settings, "thk_top_edge_direction", "top_to_bottom"),
+            getattr(settings, "thk_bottom_edge_direction", "bottom_to_top"),
+        )
+    raise ValueError(f"Unsupported scan orientation: {orientation}")
+
+
+def derive_thk_roi_from_cd(roi: Sequence[int], cd_result: DistanceResult | None) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    if cd_result is None or not cd_result.selected_pairs:
+        return x1, y1, x2, y2
+
+    left_edges = []
+    right_edges = []
+    for pair in cd_result.selected_pairs:
+        if pair.second.image_x <= pair.first.image_x:
+            continue
+        left_edges.append(float(pair.first.image_x))
+        right_edges.append(float(pair.second.image_x))
+    if not left_edges or not right_edges:
+        return x1, y1, x2, y2
+
+    left_median = float(np.median(np.asarray(left_edges, dtype=np.float64)))
+    right_median = float(np.median(np.asarray(right_edges, dtype=np.float64)))
+    cd_width = right_median - left_median
+    if cd_width <= 1.0:
+        return x1, y1, x2, y2
+
+    margin = max(THK_CD_MARGIN_MIN_PX, min(THK_CD_MARGIN_MAX_PX, cd_width * THK_CD_MARGIN_RATIO))
+    thk_x_min = max(x1, int(np.ceil(left_median + margin)))
+    thk_x_max = min(x2, int(np.floor(right_median - margin)))
+    if thk_x_max <= thk_x_min:
+        thk_x_min = max(x1, int(np.ceil(left_median)))
+        thk_x_max = min(x2, int(np.floor(right_median)))
+    if thk_x_max <= thk_x_min:
+        return x1, y1, x2, y2
+    return thk_x_min, y1, thk_x_max, y2
+
+
 def _measure_distance(
     gray: np.ndarray,
     roi: Sequence[int],
@@ -58,7 +107,8 @@ def _measure_distance(
 ) -> DistanceResult:
     scan = scan_raw_edge_candidates(gray, roi, orientation, settings)
     pair_candidates = scan_pair_candidates(scan)
-    selected_pairs = select_refined_side_pair_per_scanline(scan)
+    first_direction, second_direction = _edge_scan_directions(orientation, settings)
+    selected_pairs = select_first_valid_boundary_pairs_per_scanline(scan, first_direction, second_direction)
 
     result = DistanceResult(
         orientation=orientation,
@@ -104,5 +154,11 @@ def measure_horizontal_cd(gray: np.ndarray, roi: Sequence[int], settings: Measur
     return _measure_distance(gray, roi, "horizontal", settings)
 
 
-def measure_vertical_thk(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSettings) -> DistanceResult:
-    return _measure_distance(gray, roi, "vertical", settings)
+def measure_vertical_thk(
+    gray: np.ndarray,
+    roi: Sequence[int],
+    settings: MeasurementSettings,
+    cd_result: DistanceResult | None = None,
+) -> DistanceResult:
+    thk_roi = derive_thk_roi_from_cd(roi, cd_result)
+    return _measure_distance(gray, thk_roi, "vertical", settings)

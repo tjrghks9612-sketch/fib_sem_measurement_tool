@@ -37,7 +37,7 @@ class OptionPanel(ctk.CTkFrame):
         self.detected_px_var = tk.StringVar(value="")
         self.actual_length_var = tk.StringVar(value="")
         self.unit_var = tk.StringVar(value="um")
-        self.show_raw_var = tk.BooleanVar(value=True)
+        self.show_raw_var = tk.BooleanVar(value=False)
         self.show_selected_var = tk.BooleanVar(value=True)
         self.show_fit_var = tk.BooleanVar(value=True)
         self.show_roi_var = tk.BooleanVar(value=True)

@@ -49,10 +49,14 @@ class MeasurementSettings:
     taper_side: str = "left"
     distance_method: str = "mean"
     minimum_grayscale_delta: float = 30.0
+    cd_left_edge_direction: str = "left_to_center"
+    cd_right_edge_direction: str = "right_to_center"
+    thk_top_edge_direction: str = "top_to_bottom"
+    thk_bottom_edge_direction: str = "bottom_to_top"
     roi: Optional[Tuple[int, int, int, int]] = None
     roi_source_image: str = ""
     calibration: CalibrationSettings = field(default_factory=CalibrationSettings)
-    show_raw_candidates: bool = True
+    show_raw_candidates: bool = False
     show_selected_edges: bool = True
     show_fit_line: bool = True
     show_roi: bool = True

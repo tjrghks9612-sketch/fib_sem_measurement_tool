@@ -7,7 +7,7 @@ import numpy as np
 from fib_sem_measurement_tool.core.grayscale_line_scan import (
     refine_boundary_candidates_by_line,
     scan_raw_edge_candidates,
-    select_strongest_boundary_candidates,
+    select_first_valid_boundary_candidates,
 )
 from fib_sem_measurement_tool.models.result import MeasurementResult, RawEdgeCandidate, TaperSideResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
@@ -76,10 +76,18 @@ def _fit_selected_boundary(result: TaperSideResult, selected: Sequence[RawEdgeCa
     return result
 
 
+def _taper_edge_direction(side: str, settings: MeasurementSettings) -> str:
+    if side == "right":
+        return getattr(settings, "cd_right_edge_direction", "right_to_center")
+    return getattr(settings, "cd_left_edge_direction", "left_to_center")
+
+
 def measure_taper_side(gray: np.ndarray, roi: Sequence[int], side: str, settings: MeasurementSettings) -> TaperSideResult:
     scan = scan_raw_edge_candidates(gray, roi, "horizontal", settings)
     result = _result_with_scan_metadata(side, scan)
-    selected = refine_boundary_candidates_by_line(select_strongest_boundary_candidates(scan, side))
+    selected = refine_boundary_candidates_by_line(
+        select_first_valid_boundary_candidates(scan, side, _taper_edge_direction(side, settings))
+    )
     return _fit_selected_boundary(result, selected)
 
 

@@ -165,6 +165,27 @@ def _side_pool(candidates: Sequence[RawEdgeCandidate], midpoint: float, side: st
     raise ValueError(f"Unsupported boundary side: {side}")
 
 
+def _default_direction(scan_axis: str, side: str) -> str:
+    if scan_axis == "horizontal":
+        return "left_to_center" if side in {"left", "first"} else "right_to_center"
+    if scan_axis == "vertical":
+        return "top_to_bottom" if side in {"top", "first"} else "bottom_to_top"
+    raise ValueError(f"Unsupported scan axis: {scan_axis}")
+
+
+def scan_edge_in_direction(
+    candidates: Sequence[RawEdgeCandidate],
+    direction: str,
+) -> Optional[RawEdgeCandidate]:
+    if not candidates:
+        return None
+    if direction in {"left_to_center", "center_to_right", "top_to_bottom"}:
+        return min(candidates, key=lambda candidate: candidate.position)
+    if direction in {"center_to_left", "right_to_center", "bottom_to_top"}:
+        return max(candidates, key=lambda candidate: candidate.position)
+    raise ValueError(f"Unsupported edge scan direction: {direction}")
+
+
 def _preferred_sign(side: str) -> int:
     return -1 if side in {"left", "top", "first"} else 1
 
@@ -183,6 +204,22 @@ def select_strongest_boundary_candidates(scan_result: EdgeScanResult, side: str)
     for scan_index, candidates in _group_by_scanline(scan_result.raw_edge_candidates).items():
         side_candidates = _side_pool(candidates, midpoint, side)
         candidate = _strongest_candidate(side_candidates, side)
+        if candidate is not None:
+            selected.append(candidate)
+    return selected
+
+
+def select_first_valid_boundary_candidates(
+    scan_result: EdgeScanResult,
+    side: str,
+    direction: Optional[str] = None,
+) -> List[RawEdgeCandidate]:
+    midpoint = float(_scan_profile_length(scan_result) - 1) / 2.0
+    scan_direction = direction or _default_direction(scan_result.scan_axis, side)
+    selected: List[RawEdgeCandidate] = []
+    for _scan_index, candidates in _group_by_scanline(scan_result.raw_edge_candidates).items():
+        side_candidates = _side_pool(candidates, midpoint, side)
+        candidate = scan_edge_in_direction(side_candidates, scan_direction)
         if candidate is not None:
             selected.append(candidate)
     return selected
@@ -221,6 +258,30 @@ def refine_boundary_candidates_by_line(
     return sorted(selected, key=lambda candidate: candidate.scan_index)
 
 
+def filter_boundary_candidates_by_continuity(
+    candidates: Sequence[RawEdgeCandidate],
+    window_size: int = 5,
+    max_jump_px: float = 6.0,
+    mad_multiplier: float = 3.0,
+) -> List[RawEdgeCandidate]:
+    selected = sorted(candidates, key=lambda candidate: candidate.scan_index)
+    if len(selected) < 4:
+        return selected
+
+    coordinates = np.asarray([_profile_coordinate(candidate) for candidate in selected], dtype=np.float64)
+    half_window = max(1, int(window_size) // 2)
+    keep: List[bool] = []
+    for idx, coordinate in enumerate(coordinates):
+        start = max(0, idx - half_window)
+        end = min(len(coordinates), idx + half_window + 1)
+        local = coordinates[start:end]
+        local_median = float(np.median(local))
+        local_mad = float(np.median(np.abs(local - local_median)))
+        limit = max(float(max_jump_px), float(mad_multiplier) * 1.4826 * (local_mad + 1e-6))
+        keep.append(abs(float(coordinate) - local_median) <= limit)
+    return [candidate for candidate, is_kept in zip(selected, keep) if is_kept]
+
+
 def _pairs_from_boundary_candidates(
     scan_result: EdgeScanResult,
     first_candidates: Sequence[RawEdgeCandidate],
@@ -246,7 +307,19 @@ def _pairs_from_boundary_candidates(
     return selected
 
 
-def select_refined_side_pair_per_scanline(scan_result: EdgeScanResult) -> List[PairCandidate]:
-    first = refine_boundary_candidates_by_line(select_strongest_boundary_candidates(scan_result, "first"))
-    second = refine_boundary_candidates_by_line(select_strongest_boundary_candidates(scan_result, "second"))
+def select_first_valid_boundary_pairs_per_scanline(
+    scan_result: EdgeScanResult,
+    first_direction: Optional[str] = None,
+    second_direction: Optional[str] = None,
+) -> List[PairCandidate]:
+    first = filter_boundary_candidates_by_continuity(
+        select_first_valid_boundary_candidates(scan_result, "first", first_direction)
+    )
+    second = filter_boundary_candidates_by_continuity(
+        select_first_valid_boundary_candidates(scan_result, "second", second_direction)
+    )
     return _pairs_from_boundary_candidates(scan_result, first, second)
+
+
+def select_refined_side_pair_per_scanline(scan_result: EdgeScanResult) -> List[PairCandidate]:
+    return select_first_valid_boundary_pairs_per_scanline(scan_result)

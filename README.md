@@ -53,8 +53,8 @@ Each candidate stores scan axis, original image scanline index, ROI-local scanli
 CD and THK are separated into two phases:
 
 1. Generate all raw edge candidates for every ROI row or column.
-2. Generate all same-scanline pair candidates.
-3. Select boundary pairs from the strongest candidate in each side of the scanline, with a small line-continuity refinement for selected overlay/measurement points.
+2. Generate all same-scanline pair candidates for debug/export compatibility.
+3. Select boundary pairs from the first threshold-valid edge found in the configured scan direction for each side, with a small continuity refinement for selected overlay/measurement points.
 
 The selected value remains available for compatibility, but the result also preserves:
 
@@ -68,11 +68,13 @@ The selected value remains available for compatibility, but the result also pres
 - `scanline_coverage`
 - `selected_point_count`
 
+For `distance_both`, the horizontal CD pass runs first. THK then scans every column inside a CD-derived x range, using the median left/right CD boundaries plus a small internal margin instead of scanning the full ROI width.
+
 ## Taper
 
 Single and double taper no longer depend on CD/THK pair selection.
 
-Taper measurement first gathers every horizontal raw edge candidate inside the ROI. The left boundary uses the strongest candidate in the left side of each row; the right boundary uses the strongest candidate in the right side of each row. A small line-continuity refinement removes isolated selected-point outliers from the fit while preserving all raw candidates in the result and overlay.
+Taper measurement first gathers every horizontal raw edge candidate inside the ROI. The left and right boundaries use the same direction-based first-valid selection as CD, followed by a small line-continuity refinement for the fit while preserving all raw candidates in the result and overlay.
 
 ## UI
 
@@ -85,7 +87,7 @@ The UI uses a dark metrology dashboard layout:
 
 Overlay layers:
 
-- Raw candidates: low-opacity ticks
+- Raw candidates: low-opacity debug ticks, hidden by default
 - Selected edges: brighter markers and measurement line
 - Taper selected boundary: highlighted points
 - Fit line: separate taper line
@@ -100,8 +102,8 @@ CSV export keeps the previous measurement fields and adds debug fields such as r
 - Raw grayscale jumps are not guaranteed to be physical boundaries.
 - Internal layers, shadows, charging artifacts, texture, and noise can all appear as candidates.
 - The current goal is transparency: candidates are preserved and shown instead of filtered away.
-- Automatic final pair or boundary selection is intentionally simple and should be improved separately.
-- Dense ROIs can produce many overlay ticks; use the raw candidate layer toggle when needed.
+- Automatic final pair or boundary selection is intentionally simple and direction based.
+- Dense ROIs can produce many debug ticks; use the raw candidate layer toggle when needed.
 
 ## Tests
 

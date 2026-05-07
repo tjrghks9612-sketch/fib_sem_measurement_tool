@@ -4,6 +4,7 @@ import numpy as np
 
 from fib_sem_measurement_tool.core.profile_markers import collect_profile_edge_markers
 from fib_sem_measurement_tool.core.measurement_cd_thk import measure_horizontal_cd, measure_vertical_thk
+from fib_sem_measurement_tool.core.measurement_runner import run_measurement
 from fib_sem_measurement_tool.models.result import MeasurementResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -60,6 +61,24 @@ class CdThkMeasurementTest(unittest.TestCase):
         _, left_x, right_x = result.boundary_pairs[0]
         self.assertLess(left_x, right_x)
 
+    def test_horizontal_cd_uses_first_valid_edges_instead_of_strongest_texture(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 139, 19),
+            measurement_type="distance_horizontal",
+            minimum_grayscale_delta=30.0,
+        )
+        image = np.full((20, 140), 20, dtype=np.uint8)
+        image[:, 20:120] = 80
+        image[:, 50:90] = 230
+
+        result = measure_horizontal_cd(image, settings.roi, settings)
+
+        self.assertIsNotNone(result.selected_px)
+        self.assertAlmostEqual(result.selected_px, 100.0, delta=1.0)
+        _, left_x, right_x = result.boundary_pairs[0]
+        self.assertAlmostEqual(left_x, 19.5, delta=0.01)
+        self.assertAlmostEqual(right_x, 119.5, delta=0.01)
+
     def test_vertical_thk_measures_when_horizontal_edges_cover_only_part_of_roi_width(self) -> None:
         settings = make_settings()
         image = np.full((160, 220), 20, dtype=np.uint8)
@@ -88,6 +107,27 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertEqual(result.values_px, [4.0, 4.0, 4.0, 6.0, 6.0])
         self.assertAlmostEqual(result.selected_px, 4.8, delta=0.01)
         self.assertEqual(result.valid_count, 5)
+
+    def test_distance_both_limits_thk_scan_to_cd_interior(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 119, 99),
+            measurement_type="distance_both",
+            minimum_grayscale_delta=30.0,
+        )
+        image = np.full((100, 120), 20, dtype=np.uint8)
+        image[30:70, 40:80] = 200
+        image[5:15, 0:25] = 160
+        image[85:95, 0:25] = 160
+
+        result = run_measurement(image, settings)
+
+        self.assertIsNotNone(result.horizontal_cd)
+        self.assertIsNotNone(result.vertical_thk)
+        self.assertAlmostEqual(result.horizontal_cd.selected_px, 40.0, delta=1.0)
+        self.assertAlmostEqual(result.vertical_thk.selected_px, 40.0, delta=1.0)
+        self.assertLess(result.vertical_thk.scanned_line_count, 120)
+        self.assertGreaterEqual(min(pair.scan_index for pair in result.vertical_thk.selected_pairs), 43)
+        self.assertLessEqual(max(pair.scan_index for pair in result.vertical_thk.selected_pairs), 76)
 
     def test_vertical_thk_matches_horizontal_cd_on_transposed_image(self) -> None:
         image = np.full((90, 130), 25, dtype=np.uint8)

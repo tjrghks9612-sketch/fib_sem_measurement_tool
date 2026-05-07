@@ -98,7 +98,7 @@ def run_measurement(image: np.ndarray, settings: MeasurementSettings) -> Measure
             )
         elif settings.measurement_type == "distance_both":
             horizontal = measure_horizontal_cd(gray, clean_roi, settings)
-            vertical = measure_vertical_thk(gray, clean_roi, settings)
+            vertical = measure_vertical_thk(gray, clean_roi, settings, horizontal)
             result = MeasurementResult(
                 measurement_type=settings.measurement_type,
                 horizontal_cd=horizontal,

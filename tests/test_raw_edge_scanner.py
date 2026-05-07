@@ -8,6 +8,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
     refine_boundary_candidates_by_line,
     scan_pair_candidates,
     scan_raw_edge_candidates,
+    select_first_valid_boundary_pairs_per_scanline,
     select_refined_side_pair_per_scanline,
     select_strongest_boundary_candidates,
 )
@@ -164,7 +165,7 @@ class RawEdgeScannerTest(unittest.TestCase):
         self.assertGreater(len(pairs), scan.scanned_line_count)
         self.assertTrue(all(pair.first.position < pair.second.position for pair in pairs))
 
-    def test_refined_pair_selection_uses_strongest_candidate_in_each_half(self) -> None:
+    def test_refined_pair_selection_uses_first_valid_candidate_in_each_half(self) -> None:
         settings = make_settings()
         image = np.asarray(
             [
@@ -178,8 +179,25 @@ class RawEdgeScannerTest(unittest.TestCase):
         selected = select_refined_side_pair_per_scanline(scan)
 
         self.assertEqual(len(selected), 2)
-        self.assertEqual([pair.first.position for pair in selected], [3.5, 3.5])
+        self.assertEqual([pair.first.position for pair in selected], [0.5, 0.5])
         self.assertEqual([pair.second.position for pair in selected], [8.5, 8.5])
+
+    def test_first_valid_pair_selection_supports_inside_out_directions(self) -> None:
+        settings = make_settings()
+        image = np.asarray(
+            [
+                [120, 85, 85, 85, 5, 5, 5, 45, 45, 140, 140],
+                [120, 85, 85, 85, 5, 5, 5, 45, 45, 140, 140],
+            ],
+            dtype=np.float32,
+        )
+
+        scan = scan_raw_edge_candidates(image, (0, 0, 10, 1), "horizontal", settings)
+        selected = select_first_valid_boundary_pairs_per_scanline(scan, "center_to_left", "center_to_right")
+
+        self.assertEqual(len(selected), 2)
+        self.assertEqual([pair.first.position for pair in selected], [3.5, 3.5])
+        self.assertEqual([pair.second.position for pair in selected], [6.5, 6.5])
 
     def test_taper_boundary_selection_uses_strongest_side_candidate_not_outermost_candidate(self) -> None:
         settings = make_settings()
