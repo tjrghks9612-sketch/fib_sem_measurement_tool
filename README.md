@@ -31,6 +31,8 @@ The measurement path is:
 
 No threshold image, morphology, Canny, or image enhancement is applied to CD, THK, or taper measurement.
 
+The inspector also exposes optional signal preparation controls. `Normalize Signal` applies robust percentile normalization to the ROI profile signal before Sobel detection, which helps low-contrast images. `Denoise Signal` applies a scan-axis median filter before Sobel detection. Both controls affect detection only; raw grayscale values remain preserved in candidate metadata and profile views.
+
 ## Raw Edge Candidate Definition
 
 For each 1D grayscale profile, candidates come from the matching Sobel gradient profile. The Sobel output is normalized back to grayscale-delta units so existing threshold values remain interpretable:

@@ -98,6 +98,22 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(left_x, 49.5, delta=0.01)
         self.assertAlmostEqual(right_x, 89.5, delta=0.01)
 
+    def test_profile_normalization_can_recover_low_contrast_edges(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 119, 19),
+            measurement_type="distance_horizontal",
+            minimum_grayscale_delta=30.0,
+            normalize_grayscale_profiles=True,
+        )
+        image = np.full((20, 120), 80, dtype=np.uint8)
+        image[:, 30:90] = 98
+
+        result = measure_horizontal_cd(image, settings.roi, settings)
+
+        self.assertIsNotNone(result.selected_px)
+        self.assertAlmostEqual(result.selected_px, 60.0, delta=1.0)
+        self.assertEqual(result.status, "OK")
+
     def test_horizontal_cd_ignores_single_column_noise_before_real_boundary(self) -> None:
         settings = MeasurementSettings(
             roi=(0, 0, 139, 19),

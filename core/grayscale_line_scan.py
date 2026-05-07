@@ -16,6 +16,53 @@ SOBEL_DELTA_SCALE = 4.0
 DEFAULT_MAX_JUMP_PX = 28.0
 
 
+def _robust_normalize_signal(data: np.ndarray, settings: MeasurementSettings) -> np.ndarray:
+    if not bool(getattr(settings, "normalize_grayscale_profiles", False)):
+        return data.astype(np.float32, copy=True)
+
+    low_pct = float(getattr(settings, "normalize_low_percentile", 2.0))
+    high_pct = float(getattr(settings, "normalize_high_percentile", 98.0))
+    if high_pct <= low_pct:
+        return data.astype(np.float32, copy=True)
+
+    low = float(np.percentile(data, low_pct))
+    high = float(np.percentile(data, high_pct))
+    span = high - low
+    min_span = max(1.0, float(getattr(settings, "normalize_min_span", 12.0)))
+    if span < min_span:
+        return data.astype(np.float32, copy=True)
+    return np.clip((data.astype(np.float32, copy=False) - low) * (255.0 / span), 0.0, 255.0).astype(np.float32)
+
+
+def _median_filter_along_scan_axis(data: np.ndarray, orientation: str, window: int) -> np.ndarray:
+    win = max(1, int(window))
+    if win <= 1:
+        return data.astype(np.float32, copy=True)
+    if win % 2 == 0:
+        win += 1
+
+    axis = 1 if orientation == "horizontal" else 0
+    if data.shape[axis] < win:
+        return data.astype(np.float32, copy=True)
+
+    pad = win // 2
+    pad_width = ((0, 0), (pad, pad)) if axis == 1 else ((pad, pad), (0, 0))
+    padded = np.pad(data, pad_width, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, window_shape=win, axis=axis)
+    return np.median(windows, axis=-1).astype(np.float32)
+
+
+def _prepare_detection_crop(crop: np.ndarray, orientation: str, settings: MeasurementSettings) -> np.ndarray:
+    signal = _robust_normalize_signal(crop, settings)
+    if bool(getattr(settings, "denoise_grayscale_profiles", False)):
+        signal = _median_filter_along_scan_axis(
+            signal,
+            orientation,
+            int(getattr(settings, "profile_denoise_window", 3)),
+        )
+    return signal
+
+
 def _minimum_delta(settings: MeasurementSettings) -> float:
     return max(0.0, float(getattr(settings, "minimum_grayscale_delta", 30.0)))
 
@@ -141,13 +188,21 @@ def detect_profile_candidates(
     local_scan_index: int,
     roi_origin: tuple[int, int],
     gradient_profile: Optional[Sequence[float]] = None,
+    detection_profile: Optional[Sequence[float]] = None,
 ) -> List[RawEdgeCandidate]:
     data = np.asarray(profile, dtype=np.float32).reshape(-1)
     if data.size < 2:
         return []
+    detection_data = (
+        np.asarray(detection_profile, dtype=np.float32).reshape(-1)
+        if detection_profile is not None
+        else data
+    )
+    if detection_data.size != data.size:
+        raise ValueError("detection_profile must have the same length as profile")
 
     if gradient_profile is None:
-        gradient = _sobel_gradient_profile(data, scan_axis)
+        gradient = _sobel_gradient_profile(detection_data, scan_axis)
     else:
         gradient = np.asarray(gradient_profile, dtype=np.float32).reshape(-1)
         if gradient.size != data.size:
@@ -160,7 +215,7 @@ def detect_profile_candidates(
         delta = float(np.mean(signed_values, dtype=np.float64))
         if delta == 0.0:
             continue
-        position = _peak_position(start, end, delta, data)
+        position = _peak_position(start, end, delta, detection_data)
         position = max(0.0, min(float(data.size - 1), position))
         grayscale_before, grayscale_after = _profile_transition_values(data, position)
         image_x, image_y = _candidate_image_position(scan_axis, scan_index, position, roi_origin)
@@ -193,7 +248,8 @@ def scan_raw_edge_candidates(
 
     x1, y1, x2, y2 = [int(v) for v in roi]
     crop = np.asarray(gray[y1 : y2 + 1, x1 : x2 + 1], dtype=np.float32)
-    gradient = _sobel_gradient_image(crop, orientation)
+    detection_crop = _prepare_detection_crop(crop, orientation, settings)
+    gradient = _sobel_gradient_image(detection_crop, orientation)
     scanned_line_count = int(crop.shape[0] if orientation == "horizontal" else crop.shape[1])
     per_scanline_candidate_count: Dict[int, int] = {}
     profiles_by_scanline: Dict[int, List[float]] = {}
@@ -212,6 +268,7 @@ def scan_raw_edge_candidates(
                 local_scan_index=local_y,
                 roi_origin=(x1, y1),
                 gradient_profile=gradient[local_y, :],
+                detection_profile=detection_crop[local_y, :],
             )
             per_scanline_candidate_count[int(scan_index)] = len(candidates)
             raw_candidates.extend(candidates)
@@ -228,6 +285,7 @@ def scan_raw_edge_candidates(
                 local_scan_index=local_x,
                 roi_origin=(x1, y1),
                 gradient_profile=gradient[:, local_x],
+                detection_profile=detection_crop[:, local_x],
             )
             per_scanline_candidate_count[int(scan_index)] = len(candidates)
             raw_candidates.extend(candidates)
