@@ -5,9 +5,12 @@ import numpy as np
 
 from fib_sem_measurement_tool.core.grayscale_line_scan import (
     detect_profile_candidates,
+    fill_small_gaps_nan,
+    moving_average_nan,
     refine_boundary_candidates_by_line,
     scan_pair_candidates,
     scan_raw_edge_candidates,
+    scan_edge_in_direction,
     select_first_valid_boundary_pairs_per_scanline,
     select_refined_side_pair_per_scanline,
     select_strongest_boundary_candidates,
@@ -71,7 +74,7 @@ class RawEdgeScannerTest(unittest.TestCase):
         self.assertEqual(sorted(scan.per_scanline_candidate_count), [2, 3, 4, 5, 6, 7])
         self.assertEqual(set(candidate.local_scan_index for candidate in scan.raw_edge_candidates), {0, 1, 2, 3, 4, 5})
 
-    def test_threshold_includes_only_jumps_at_or_above_minimum_delta(self) -> None:
+    def test_threshold_keeps_sobel_local_peaks_at_or_above_minimum_delta(self) -> None:
         settings = make_settings()
         settings.minimum_grayscale_delta = 25.0
         profile = np.asarray([10, 30, 55, 79, 105], dtype=np.uint8)
@@ -85,8 +88,8 @@ class RawEdgeScannerTest(unittest.TestCase):
             roi_origin=(0, 0),
         )
 
-        self.assertEqual([candidate.position for candidate in candidates], [1.5, 3.5])
-        self.assertEqual([candidate.signed_delta for candidate in candidates], [25.0, 26.0])
+        self.assertEqual([candidate.position for candidate in candidates], [3.5])
+        self.assertEqual([candidate.signed_delta for candidate in candidates], [50.0])
 
     def test_pair_selection_preserves_raw_candidates_and_pair_candidates(self) -> None:
         settings = make_settings()
@@ -165,7 +168,7 @@ class RawEdgeScannerTest(unittest.TestCase):
         self.assertGreater(len(pairs), scan.scanned_line_count)
         self.assertTrue(all(pair.first.position < pair.second.position for pair in pairs))
 
-    def test_refined_pair_selection_prefers_stable_bounded_region(self) -> None:
+    def test_refined_pair_selection_uses_strongest_sobel_local_peak(self) -> None:
         settings = make_settings()
         image = np.asarray(
             [
@@ -180,7 +183,7 @@ class RawEdgeScannerTest(unittest.TestCase):
 
         self.assertEqual(len(selected), 2)
         self.assertEqual([pair.first.position for pair in selected], [3.5, 3.5])
-        self.assertEqual([pair.second.position for pair in selected], [6.5, 6.5])
+        self.assertEqual([pair.second.position for pair in selected], [8.5, 8.5])
 
     def test_first_valid_pair_selection_supports_inside_out_directions(self) -> None:
         settings = make_settings()
@@ -197,7 +200,33 @@ class RawEdgeScannerTest(unittest.TestCase):
 
         self.assertEqual(len(selected), 2)
         self.assertEqual([pair.first.position for pair in selected], [3.5, 3.5])
-        self.assertEqual([pair.second.position for pair in selected], [6.5, 6.5])
+        self.assertEqual([pair.second.position for pair in selected], [8.5, 8.5])
+
+    def test_scan_edge_in_direction_supports_relative_direction_modes(self) -> None:
+        candidates = [
+            RawEdgeCandidate("horizontal", 0, 0, position, position, 0.0, strength, strength, 1, 0.0, strength)
+            for position, strength in [(2.0, 40.0), (5.0, 90.0), (8.0, 60.0)]
+        ]
+
+        self.assertEqual(scan_edge_in_direction(candidates, "outside_to_center", from_left=True).position, 2.0)
+        self.assertEqual(scan_edge_in_direction(candidates, "outside_to_center", from_left=False).position, 8.0)
+        self.assertEqual(scan_edge_in_direction(candidates, "center_to_outside", from_left=True).position, 8.0)
+        self.assertEqual(scan_edge_in_direction(candidates, "center_to_outside", from_left=False).position, 2.0)
+        self.assertEqual(
+            scan_edge_in_direction(candidates, "outside_to_center", from_left=True, prefer_strongest=True).position,
+            5.0,
+        )
+
+    def test_nan_postprocessing_fills_small_gaps_and_smooths_finite_points(self) -> None:
+        values = np.asarray([1.0, np.nan, np.nan, 4.0, np.nan, np.nan, np.nan, 8.0])
+
+        filled = fill_small_gaps_nan(values, max_gap=2)
+        smoothed = moving_average_nan(filled, win=3)
+
+        np.testing.assert_allclose(filled[:4], [1.0, 2.0, 3.0, 4.0])
+        self.assertTrue(np.isnan(filled[4]))
+        self.assertTrue(np.isnan(smoothed[4]))
+        self.assertAlmostEqual(smoothed[1], 2.0, delta=1e-6)
 
     def test_taper_boundary_selection_uses_strongest_side_candidate_not_outermost_candidate(self) -> None:
         settings = make_settings()
@@ -251,7 +280,11 @@ class RawEdgeScannerTest(unittest.TestCase):
 
         self.assertEqual([pair.scan_index for pair in selected], [0, 1, 2, 3, 4])
         self.assertEqual([pair.first.image_y for pair in selected], [1.5, 1.5, 1.5, 1.5, 1.5])
-        self.assertEqual([pair.second.image_y for pair in selected], [5.5, 5.5, 5.5, 7.5, 7.5])
+        np.testing.assert_allclose(
+            [pair.second.image_y for pair in selected],
+            [5.5, 5.5, 6.166666666666667, 6.833333333333333, 7.5],
+            rtol=1e-6,
+        )
 
 
 if __name__ == "__main__":

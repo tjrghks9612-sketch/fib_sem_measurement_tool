@@ -4,10 +4,16 @@ from collections import defaultdict
 from itertools import combinations
 from typing import Dict, Iterable, List, Optional, Sequence
 
+import cv2
 import numpy as np
 
 from fib_sem_measurement_tool.models.result import EdgeScanResult, PairCandidate, RawEdgeCandidate
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
+
+
+SOBEL_KERNEL_SIZE = 3
+SOBEL_DELTA_SCALE = 4.0
+DEFAULT_MAX_JUMP_PX = 28.0
 
 
 def _minimum_delta(settings: MeasurementSettings) -> float:
@@ -28,6 +34,105 @@ def _candidate_image_position(
     raise ValueError(f"Unsupported scan axis: {scan_axis}")
 
 
+def _sobel_gradient_profile(data: np.ndarray, scan_axis: str) -> np.ndarray:
+    if scan_axis == "horizontal":
+        gradient = cv2.Sobel(data.reshape(1, -1), cv2.CV_32F, 1, 0, ksize=SOBEL_KERNEL_SIZE)
+        return gradient.reshape(-1) / SOBEL_DELTA_SCALE
+    if scan_axis == "vertical":
+        gradient = cv2.Sobel(data.reshape(-1, 1), cv2.CV_32F, 0, 1, ksize=SOBEL_KERNEL_SIZE)
+        return gradient.reshape(-1) / SOBEL_DELTA_SCALE
+    raise ValueError(f"Unsupported scan axis: {scan_axis}")
+
+
+def _sobel_gradient_image(crop: np.ndarray, orientation: str) -> np.ndarray:
+    if orientation == "horizontal":
+        return cv2.Sobel(crop, cv2.CV_32F, 1, 0, ksize=SOBEL_KERNEL_SIZE) / SOBEL_DELTA_SCALE
+    if orientation == "vertical":
+        return cv2.Sobel(crop, cv2.CV_32F, 0, 1, ksize=SOBEL_KERNEL_SIZE) / SOBEL_DELTA_SCALE
+    raise ValueError(f"Unsupported scan orientation: {orientation}")
+
+
+def _gradient_sign(value: float) -> int:
+    if value > 0.0:
+        return 1
+    if value < 0.0:
+        return -1
+    return 0
+
+
+def _local_peak_runs(gradient: np.ndarray, min_delta: float) -> List[tuple[int, int]]:
+    strength = np.abs(gradient)
+    if strength.size == 0:
+        return []
+
+    peaks: List[tuple[int, int]] = []
+    eps = 1e-6
+    idx = 0
+    while idx < strength.size:
+        value = float(strength[idx])
+        sign = _gradient_sign(float(gradient[idx]))
+        if not np.isfinite(value) or value < min_delta or value <= 0.0 or sign == 0:
+            idx += 1
+            continue
+
+        start = idx
+        end = idx
+        while (
+            end + 1 < strength.size
+            and _gradient_sign(float(gradient[end + 1])) == sign
+            and abs(float(strength[end + 1]) - value) <= eps
+        ):
+            end += 1
+
+        left = (
+            float(strength[start - 1])
+            if start > 0 and _gradient_sign(float(gradient[start - 1])) == sign
+            else -np.inf
+        )
+        right = (
+            float(strength[end + 1])
+            if end + 1 < strength.size and _gradient_sign(float(gradient[end + 1])) == sign
+            else -np.inf
+        )
+        if value > left + eps and value > right + eps:
+            peaks.append((start, end))
+        idx = end + 1
+    return peaks
+
+
+def _peak_position(start: int, end: int, signed_delta: float, data: Optional[np.ndarray] = None) -> float:
+    if data is not None and data.size >= 2:
+        raw_diff = data[1:] - data[:-1]
+        sign = _gradient_sign(signed_delta)
+        first = max(0, start - 1)
+        last = min(raw_diff.size - 1, end)
+        transition_indices = [
+            index
+            for index in range(first, last + 1)
+            if _gradient_sign(float(raw_diff[index])) == sign
+        ]
+        if transition_indices:
+            best = max(transition_indices, key=lambda index: abs(float(raw_diff[index])))
+            return float(best) + 0.5
+
+    center = (float(start) + float(end)) / 2.0
+    if start != end:
+        return center
+    if signed_delta > 0.0:
+        return center + 0.5
+    if signed_delta < 0.0:
+        return center - 0.5
+    return center
+
+
+def _profile_transition_values(data: np.ndarray, position: float) -> tuple[float, float]:
+    before_idx = int(np.floor(position))
+    after_idx = before_idx + 1
+    before_idx = max(0, min(before_idx, data.size - 1))
+    after_idx = max(0, min(after_idx, data.size - 1))
+    return float(data[before_idx]), float(data[after_idx])
+
+
 def detect_profile_candidates(
     profile: Sequence[float],
     settings: MeasurementSettings,
@@ -35,23 +140,29 @@ def detect_profile_candidates(
     scan_index: int,
     local_scan_index: int,
     roi_origin: tuple[int, int],
+    gradient_profile: Optional[Sequence[float]] = None,
 ) -> List[RawEdgeCandidate]:
     data = np.asarray(profile, dtype=np.float32).reshape(-1)
     if data.size < 2:
         return []
 
-    diff = data[1:] - data[:-1]
-    strength = np.abs(diff)
+    if gradient_profile is None:
+        gradient = _sobel_gradient_profile(data, scan_axis)
+    else:
+        gradient = np.asarray(gradient_profile, dtype=np.float32).reshape(-1)
+        if gradient.size != data.size:
+            raise ValueError("gradient_profile must have the same length as profile")
     min_delta = _minimum_delta(settings)
 
     candidates: List[RawEdgeCandidate] = []
-    for i, signed_delta in enumerate(diff):
-        delta = float(signed_delta)
+    for start, end in _local_peak_runs(gradient, min_delta):
+        signed_values = gradient[start : end + 1]
+        delta = float(np.mean(signed_values, dtype=np.float64))
         if delta == 0.0:
             continue
-        if float(strength[i]) < min_delta:
-            continue
-        position = float(i) + 0.5
+        position = _peak_position(start, end, delta, data)
+        position = max(0.0, min(float(data.size - 1), position))
+        grayscale_before, grayscale_after = _profile_transition_values(data, position)
         image_x, image_y = _candidate_image_position(scan_axis, scan_index, position, roi_origin)
         candidates.append(
             RawEdgeCandidate(
@@ -61,11 +172,11 @@ def detect_profile_candidates(
                 position=position,
                 image_x=image_x,
                 image_y=image_y,
-                strength=float(strength[i]),
+                strength=float(abs(delta)),
                 signed_delta=delta,
                 sign=1 if delta > 0.0 else -1,
-                grayscale_before=float(data[i]),
-                grayscale_after=float(data[i + 1]),
+                grayscale_before=grayscale_before,
+                grayscale_after=grayscale_after,
             )
         )
     return candidates
@@ -82,6 +193,7 @@ def scan_raw_edge_candidates(
 
     x1, y1, x2, y2 = [int(v) for v in roi]
     crop = np.asarray(gray[y1 : y2 + 1, x1 : x2 + 1], dtype=np.float32)
+    gradient = _sobel_gradient_image(crop, orientation)
     scanned_line_count = int(crop.shape[0] if orientation == "horizontal" else crop.shape[1])
     per_scanline_candidate_count: Dict[int, int] = {}
     profiles_by_scanline: Dict[int, List[float]] = {}
@@ -99,6 +211,7 @@ def scan_raw_edge_candidates(
                 scan_index=scan_index,
                 local_scan_index=local_y,
                 roi_origin=(x1, y1),
+                gradient_profile=gradient[local_y, :],
             )
             per_scanline_candidate_count[int(scan_index)] = len(candidates)
             raw_candidates.extend(candidates)
@@ -114,6 +227,7 @@ def scan_raw_edge_candidates(
                 scan_index=scan_index,
                 local_scan_index=local_x,
                 roi_origin=(x1, y1),
+                gradient_profile=gradient[:, local_x],
             )
             per_scanline_candidate_count[int(scan_index)] = len(candidates)
             raw_candidates.extend(candidates)
@@ -182,14 +296,35 @@ def _default_direction(scan_axis: str, side: str) -> str:
 def scan_edge_in_direction(
     candidates: Sequence[RawEdgeCandidate],
     direction: str,
+    from_left: bool = True,
+    prefer_strongest: bool = False,
 ) -> Optional[RawEdgeCandidate]:
     if not candidates:
         return None
-    if direction in {"left_to_center", "center_to_right", "top_to_bottom"}:
-        return min(candidates, key=lambda candidate: candidate.position)
-    if direction in {"center_to_left", "right_to_center", "bottom_to_top"}:
-        return max(candidates, key=lambda candidate: candidate.position)
-    raise ValueError(f"Unsupported edge scan direction: {direction}")
+
+    if direction == "outside_to_center":
+        ordered = sorted(candidates, key=lambda candidate: candidate.position, reverse=not from_left)
+    elif direction == "center_to_outside":
+        ordered = sorted(candidates, key=lambda candidate: candidate.position, reverse=from_left)
+    elif direction in {"left_to_center", "center_to_right", "top_to_bottom"}:
+        ordered = sorted(candidates, key=lambda candidate: candidate.position)
+    elif direction in {"center_to_left", "right_to_center", "bottom_to_top"}:
+        ordered = sorted(candidates, key=lambda candidate: candidate.position, reverse=True)
+    else:
+        raise ValueError(f"Unsupported edge scan direction: {direction}")
+
+    if not prefer_strongest:
+        return ordered[0]
+
+    rank = {id(candidate): index for index, candidate in enumerate(ordered)}
+    return max(
+        ordered,
+        key=lambda candidate: (
+            float(candidate.strength),
+            abs(float(candidate.signed_delta)),
+            -rank[id(candidate)],
+        ),
+    )
 
 
 def _preferred_sign(side: str) -> int:
@@ -219,13 +354,21 @@ def select_first_valid_boundary_candidates(
     scan_result: EdgeScanResult,
     side: str,
     direction: Optional[str] = None,
+    prefer_sign: bool = False,
 ) -> List[RawEdgeCandidate]:
     midpoint = float(_scan_profile_length(scan_result) - 1) / 2.0
     scan_direction = direction or _default_direction(scan_result.scan_axis, side)
     selected: List[RawEdgeCandidate] = []
     for _scan_index, candidates in _group_by_scanline(scan_result.raw_edge_candidates).items():
         side_candidates = _side_pool(candidates, midpoint, side)
-        candidate = scan_edge_in_direction(side_candidates, scan_direction)
+        if prefer_sign:
+            preferred = [candidate for candidate in side_candidates if candidate.sign == _preferred_sign(side)]
+            side_candidates = preferred or side_candidates
+        candidate = scan_edge_in_direction(
+            side_candidates,
+            scan_direction,
+            from_left=side in {"left", "top", "first"},
+        )
         if candidate is not None:
             selected.append(candidate)
     return selected
@@ -288,6 +431,195 @@ def filter_boundary_candidates_by_continuity(
     return [candidate for candidate, is_kept in zip(selected, keep) if is_kept]
 
 
+def fill_small_gaps_nan(values: Sequence[float], max_gap: int) -> np.ndarray:
+    data = np.asarray(values, dtype=np.float64).copy()
+    if data.size == 0:
+        return data
+
+    limit = max(0, int(max_gap))
+    isnan = np.isnan(data)
+    idx = 0
+    while idx < data.size:
+        if not isnan[idx]:
+            idx += 1
+            continue
+        start = idx
+        while idx < data.size and isnan[idx]:
+            idx += 1
+        end = idx
+        gap = end - start
+        left = start - 1
+        right = end
+        if gap <= limit and left >= 0 and right < data.size and not np.isnan(data[left]) and not np.isnan(data[right]):
+            data[start:end] = np.linspace(data[left], data[right], gap + 2, dtype=np.float64)[1:-1]
+    return data
+
+
+def moving_average_nan(values: Sequence[float], win: int) -> np.ndarray:
+    data = np.asarray(values, dtype=np.float64)
+    if data.size == 0:
+        return data.copy()
+
+    window = max(1, int(win))
+    if window % 2 == 0:
+        window += 1
+    half = window // 2
+    smoothed = np.full(data.shape, np.nan, dtype=np.float64)
+    for idx, value in enumerate(data):
+        if np.isnan(value):
+            continue
+        start = max(0, idx - half)
+        end = min(data.size, idx + half + 1)
+        local = data[start:end]
+        finite = local[np.isfinite(local)]
+        if finite.size:
+            smoothed[idx] = float(np.mean(finite))
+    return smoothed
+
+
+def _scan_indices(scan_result: EdgeScanResult) -> List[int]:
+    x1, y1, x2, y2 = scan_result.roi
+    if scan_result.scan_axis == "horizontal":
+        return list(range(int(y1), int(y2) + 1))
+    return list(range(int(x1), int(x2) + 1))
+
+
+def _local_scan_index(scan_result: EdgeScanResult, scan_index: int) -> int:
+    x1, y1, _x2, _y2 = scan_result.roi
+    if scan_result.scan_axis == "horizontal":
+        return int(scan_index) - int(y1)
+    return int(scan_index) - int(x1)
+
+
+def _candidate_from_position(
+    scan_result: EdgeScanResult,
+    scan_index: int,
+    position: float,
+    template: Optional[RawEdgeCandidate] = None,
+) -> RawEdgeCandidate:
+    x1, y1, _x2, _y2 = scan_result.roi
+    profile = _scanline_profile(scan_result, scan_index)
+    if profile is not None:
+        grayscale_before, grayscale_after = _profile_transition_values(profile, position)
+    elif template is not None:
+        grayscale_before = float(template.grayscale_before)
+        grayscale_after = float(template.grayscale_after)
+    else:
+        grayscale_before = 0.0
+        grayscale_after = 0.0
+
+    if template is not None:
+        signed_delta = float(template.signed_delta)
+        strength = float(template.strength)
+        sign = int(template.sign)
+    else:
+        signed_delta = float(grayscale_after - grayscale_before)
+        strength = abs(signed_delta)
+        sign = 1 if signed_delta >= 0.0 else -1
+
+    image_x, image_y = _candidate_image_position(scan_result.scan_axis, int(scan_index), float(position), (x1, y1))
+    return RawEdgeCandidate(
+        scan_axis=scan_result.scan_axis,
+        scan_index=int(scan_index),
+        local_scan_index=_local_scan_index(scan_result, int(scan_index)),
+        position=float(position),
+        image_x=image_x,
+        image_y=image_y,
+        strength=strength,
+        signed_delta=signed_delta,
+        sign=sign,
+        grayscale_before=grayscale_before,
+        grayscale_after=grayscale_after,
+    )
+
+
+def postprocess_boundary_candidates(
+    scan_result: EdgeScanResult,
+    candidates: Sequence[RawEdgeCandidate],
+    max_gap: int,
+    smooth_window: int,
+) -> List[RawEdgeCandidate]:
+    scan_indices = _scan_indices(scan_result)
+    if not scan_indices:
+        return []
+
+    by_scan: Dict[int, RawEdgeCandidate] = {}
+    for candidate in candidates:
+        existing = by_scan.get(int(candidate.scan_index))
+        if existing is None or candidate.strength > existing.strength:
+            by_scan[int(candidate.scan_index)] = candidate
+
+    values = np.full(len(scan_indices), np.nan, dtype=np.float64)
+    for idx, scan_index in enumerate(scan_indices):
+        candidate = by_scan.get(int(scan_index))
+        if candidate is not None:
+            values[idx] = float(candidate.position)
+
+    filled = fill_small_gaps_nan(values, max_gap=max_gap)
+    smoothed = moving_average_nan(filled, win=smooth_window)
+    profile_length = _scan_profile_length(scan_result)
+    result: List[RawEdgeCandidate] = []
+    for idx, position in enumerate(smoothed):
+        if not np.isfinite(position):
+            continue
+        scan_index = scan_indices[idx]
+        template = by_scan.get(int(scan_index))
+        if template is None:
+            template = min(
+                by_scan.values(),
+                key=lambda candidate: abs(int(candidate.scan_index) - int(scan_index)),
+                default=None,
+            )
+        clean_position = max(0.0, min(float(profile_length - 1), float(position)))
+        result.append(_candidate_from_position(scan_result, scan_index, clean_position, template))
+    return result
+
+
+def _repair_boundary_jumps(
+    scan_result: EdgeScanResult,
+    candidates: Sequence[RawEdgeCandidate],
+    side: str,
+    max_jump_px: float,
+) -> List[RawEdgeCandidate]:
+    selected = sorted(candidates, key=lambda candidate: candidate.scan_index)
+    if not selected:
+        return []
+
+    grouped = _group_by_scanline(scan_result.raw_edge_candidates)
+    midpoint = float(_scan_profile_length(scan_result) - 1) / 2.0
+    repaired: List[RawEdgeCandidate] = []
+    previous_position: Optional[float] = None
+    jump_limit = max(0.0, float(max_jump_px))
+    for candidate in selected:
+        chosen = candidate
+        if previous_position is not None and abs(float(candidate.position) - previous_position) > jump_limit:
+            same_line = _side_pool(grouped.get(int(candidate.scan_index), []), midpoint, side)
+            nearby = [
+                item
+                for item in same_line
+                if abs(float(item.position) - previous_position) <= jump_limit
+            ]
+            if nearby:
+                chosen = min(
+                    nearby,
+                    key=lambda item: (
+                        abs(float(item.position) - previous_position),
+                        -float(item.strength),
+                    ),
+                )
+        repaired.append(chosen)
+        previous_position = float(chosen.position)
+    return repaired
+
+
+def _postprocess_defaults(scan_axis: str) -> tuple[int, int]:
+    if scan_axis == "horizontal":
+        return 10, 7
+    if scan_axis == "vertical":
+        return 6, 3
+    raise ValueError(f"Unsupported scan axis: {scan_axis}")
+
+
 def _pairs_from_boundary_candidates(
     scan_result: EdgeScanResult,
     first_candidates: Sequence[RawEdgeCandidate],
@@ -311,6 +643,145 @@ def _pairs_from_boundary_candidates(
             )
         )
     return selected
+
+
+def _candidate_density_clusters(
+    scan_result: EdgeScanResult,
+    min_coverage: float = 0.12,
+    smooth_window: int = 5,
+) -> List[dict[str, float]]:
+    profile_length = _scan_profile_length(scan_result)
+    if profile_length <= 0 or scan_result.scanned_line_count <= 0:
+        return []
+
+    counts = np.zeros(profile_length, dtype=np.float64)
+    for candidate in scan_result.raw_edge_candidates:
+        position = int(round(float(candidate.position)))
+        if 0 <= position < profile_length:
+            counts[position] += 1.0
+
+    window = max(1, int(smooth_window))
+    if window % 2 == 0:
+        window += 1
+    smoothed = np.convolve(counts, np.ones(window, dtype=np.float64) / float(window), mode="same")
+    threshold = max(8.0, float(scan_result.scanned_line_count) * float(min_coverage))
+    active = smoothed >= threshold
+
+    clusters: List[dict[str, float]] = []
+    idx = 0
+    while idx < profile_length:
+        if not bool(active[idx]):
+            idx += 1
+            continue
+        start = idx
+        while idx < profile_length and bool(active[idx]):
+            idx += 1
+        end = idx - 1
+        margin = max(2, window // 2)
+        low = max(0.0, float(start - margin))
+        high = min(float(profile_length - 1), float(end + margin))
+        members = [
+            candidate
+            for candidate in scan_result.raw_edge_candidates
+            if low <= float(candidate.position) <= high
+        ]
+        if not members:
+            continue
+        unique_scanlines = {int(candidate.scan_index) for candidate in members}
+        coverage = float(len(unique_scanlines) / scan_result.scanned_line_count)
+        if coverage < float(min_coverage):
+            continue
+        strengths = np.asarray([candidate.strength for candidate in members], dtype=np.float64)
+        positions = np.asarray([candidate.position for candidate in members], dtype=np.float64)
+        weight_sum = float(np.sum(strengths))
+        center = float(np.average(positions, weights=strengths)) if weight_sum > 0.0 else float(np.median(positions))
+        clusters.append(
+            {
+                "start": low,
+                "end": high,
+                "center": center,
+                "coverage": coverage,
+                "median_strength": float(np.median(strengths)),
+                "score": float(coverage * max(1.0, float(np.median(strengths)))),
+            }
+        )
+    return sorted(clusters, key=lambda cluster: cluster["center"])
+
+
+def _candidate_near_cluster(
+    candidates: Sequence[RawEdgeCandidate],
+    cluster: dict[str, float],
+    margin_px: float,
+) -> Optional[RawEdgeCandidate]:
+    low = float(cluster["start"]) - float(margin_px)
+    high = float(cluster["end"]) + float(margin_px)
+    center = float(cluster["center"])
+    pool = [candidate for candidate in candidates if low <= float(candidate.position) <= high]
+    if not pool:
+        return None
+    return max(
+        pool,
+        key=lambda candidate: (
+            float(candidate.strength),
+            -abs(float(candidate.position) - center),
+        ),
+    )
+
+
+def select_density_layer_pairs_per_scanline(
+    scan_result: EdgeScanResult,
+    max_jump_px: float = DEFAULT_MAX_JUMP_PX,
+    min_coverage: float = 0.12,
+) -> List[PairCandidate]:
+    if scan_result.scan_axis != "vertical" or scan_result.scanned_line_count < 128:
+        return []
+
+    clusters = _candidate_density_clusters(scan_result, min_coverage=min_coverage)
+    if len(clusters) < 2:
+        return []
+
+    profile_length = _scan_profile_length(scan_result)
+    min_separation = max(12.0, float(profile_length) * 0.08)
+    first_cluster = clusters[0]
+    second_cluster: Optional[dict[str, float]] = None
+    for cluster in clusters[1:]:
+        if float(cluster["center"]) - float(first_cluster["center"]) < min_separation:
+            continue
+        second_cluster = cluster
+        break
+    if second_cluster is None:
+        return []
+
+    grouped = _group_by_scanline(scan_result.raw_edge_candidates)
+    first_candidates: List[RawEdgeCandidate] = []
+    second_candidates: List[RawEdgeCandidate] = []
+    cluster_margin = max(4.0, float(profile_length) * 0.025)
+    for scan_index in _scan_indices(scan_result):
+        candidates = grouped.get(int(scan_index), [])
+        first = _candidate_near_cluster(candidates, first_cluster, cluster_margin)
+        second = _candidate_near_cluster(candidates, second_cluster, cluster_margin)
+        if first is None or second is None or second.position <= first.position:
+            continue
+        first_candidates.append(first)
+        second_candidates.append(second)
+
+    if not first_candidates or not second_candidates:
+        return []
+
+    max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
+    first = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(scan_result, first_candidates, "first", max_jump_px),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
+    )
+    second = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(scan_result, second_candidates, "second", max_jump_px),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
+    )
+    return _pairs_from_boundary_candidates(scan_result, first, second)
 
 
 def _scanline_profile(scan_result: EdgeScanResult, scan_index: int) -> Optional[np.ndarray]:
@@ -429,6 +900,7 @@ def select_stable_region_pairs_per_scanline(
     scan_result: EdgeScanResult,
     first_direction: Optional[str] = None,
     second_direction: Optional[str] = None,
+    max_jump_px: float = DEFAULT_MAX_JUMP_PX,
 ) -> List[PairCandidate]:
     midpoint = float(_scan_profile_length(scan_result) - 1) / 2.0
     selected_pairs: List[PairCandidate] = []
@@ -442,8 +914,19 @@ def select_stable_region_pairs_per_scanline(
     if not selected_pairs and not scan_result.profiles_by_scanline:
         return select_first_valid_boundary_pairs_per_scanline(scan_result, first_direction, second_direction)
 
-    first = filter_boundary_candidates_by_continuity([pair.first for pair in selected_pairs])
-    second = filter_boundary_candidates_by_continuity([pair.second for pair in selected_pairs])
+    max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
+    first = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(scan_result, [pair.first for pair in selected_pairs], "first", max_jump_px),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
+    )
+    second = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(scan_result, [pair.second for pair in selected_pairs], "second", max_jump_px),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
+    )
     return _pairs_from_boundary_candidates(scan_result, first, second)
 
 
@@ -451,15 +934,46 @@ def select_first_valid_boundary_pairs_per_scanline(
     scan_result: EdgeScanResult,
     first_direction: Optional[str] = None,
     second_direction: Optional[str] = None,
+    max_jump_px: float = DEFAULT_MAX_JUMP_PX,
 ) -> List[PairCandidate]:
-    first = filter_boundary_candidates_by_continuity(
-        select_first_valid_boundary_candidates(scan_result, "first", first_direction)
+    max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
+    first = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(
+            scan_result,
+            select_first_valid_boundary_candidates(scan_result, "first", first_direction),
+            "first",
+            max_jump_px,
+        ),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
     )
-    second = filter_boundary_candidates_by_continuity(
-        select_first_valid_boundary_candidates(scan_result, "second", second_direction)
+    second = postprocess_boundary_candidates(
+        scan_result,
+        _repair_boundary_jumps(
+            scan_result,
+            select_first_valid_boundary_candidates(scan_result, "second", second_direction),
+            "second",
+            max_jump_px,
+        ),
+        max_gap=max_gap,
+        smooth_window=smooth_window,
     )
     return _pairs_from_boundary_candidates(scan_result, first, second)
 
 
 def select_refined_side_pair_per_scanline(scan_result: EdgeScanResult) -> List[PairCandidate]:
     return select_stable_region_pairs_per_scanline(scan_result)
+
+
+def select_boundary_curve_candidates(
+    scan_result: EdgeScanResult,
+    side: str,
+    direction: Optional[str] = None,
+    max_jump_px: float = DEFAULT_MAX_JUMP_PX,
+    prefer_sign: bool = False,
+) -> List[RawEdgeCandidate]:
+    max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
+    selected = select_first_valid_boundary_candidates(scan_result, side, direction, prefer_sign=prefer_sign)
+    repaired = _repair_boundary_jumps(scan_result, selected, side, max_jump_px)
+    return postprocess_boundary_candidates(scan_result, repaired, max_gap=max_gap, smooth_window=smooth_window)

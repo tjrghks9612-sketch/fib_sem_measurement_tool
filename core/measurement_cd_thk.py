@@ -7,9 +7,10 @@ import numpy as np
 from fib_sem_measurement_tool.core.grayscale_line_scan import (
     scan_pair_candidates,
     scan_raw_edge_candidates,
+    select_density_layer_pairs_per_scanline,
     select_stable_region_pairs_per_scanline,
 )
-from fib_sem_measurement_tool.models.result import DistanceResult, PairCandidate
+from fib_sem_measurement_tool.models.result import DistanceResult, MeasurementResult, PairCandidate
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
 
@@ -108,7 +109,17 @@ def _measure_distance(
     scan = scan_raw_edge_candidates(gray, roi, orientation, settings)
     pair_candidates = scan_pair_candidates(scan)
     first_direction, second_direction = _edge_scan_directions(orientation, settings)
-    selected_pairs = select_stable_region_pairs_per_scanline(scan, first_direction, second_direction)
+    max_jump_px = float(getattr(settings, "max_jump_px", 28.0))
+    selected_pairs = []
+    if orientation == "vertical":
+        selected_pairs = select_density_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
+    if not selected_pairs:
+        selected_pairs = select_stable_region_pairs_per_scanline(
+            scan,
+            first_direction,
+            second_direction,
+            max_jump_px=max_jump_px,
+        )
 
     result = DistanceResult(
         orientation=orientation,
@@ -162,3 +173,48 @@ def measure_vertical_thk(
 ) -> DistanceResult:
     thk_roi = derive_thk_roi_from_cd(roi, cd_result)
     return _measure_distance(gray, thk_roi, "vertical", settings)
+
+
+class LimitPeakBoundaryEngine:
+    def __init__(self, settings: MeasurementSettings):
+        self.settings = settings
+
+    def measure(
+        self,
+        gray: np.ndarray,
+        roi: Sequence[int],
+        measure_direction: str | None = None,
+    ) -> dict[str, DistanceResult]:
+        direction = measure_direction or getattr(self.settings, "measure_direction", "both")
+        if direction not in {"horizontal", "vertical", "both"}:
+            raise ValueError(f"Unsupported measure direction: {direction}")
+
+        results: dict[str, DistanceResult] = {}
+        horizontal: DistanceResult | None = None
+        if direction in {"horizontal", "both"}:
+            horizontal = measure_horizontal_cd(gray, roi, self.settings)
+            results["horizontal"] = horizontal
+        if direction in {"vertical", "both"}:
+            results["vertical"] = measure_vertical_thk(gray, roi, self.settings, horizontal)
+        return results
+
+
+class CDMeasurementEngine:
+    def __init__(self, settings: MeasurementSettings):
+        self.settings = settings
+        self.boundary_engine = LimitPeakBoundaryEngine(settings)
+
+    def measure(self, gray: np.ndarray, roi: Sequence[int], measure_direction: str | None = None) -> MeasurementResult:
+        direction = measure_direction or getattr(self.settings, "measure_direction", "both")
+        results = self.boundary_engine.measure(gray, roi, direction)
+        horizontal = results.get("horizontal")
+        vertical = results.get("vertical")
+        warning_message = "; ".join(
+            item.warning_message for item in (horizontal, vertical) if item is not None and item.warning_message
+        )
+        return MeasurementResult(
+            measurement_type=f"distance_{direction}",
+            horizontal_cd=horizontal,
+            vertical_thk=vertical,
+            warning_message=warning_message,
+        )

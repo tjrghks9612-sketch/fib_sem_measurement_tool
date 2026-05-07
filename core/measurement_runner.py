@@ -5,7 +5,7 @@ import logging
 import numpy as np
 
 from fib_sem_measurement_tool.core.image_io import to_gray
-from fib_sem_measurement_tool.core.measurement_cd_thk import measure_horizontal_cd, measure_vertical_thk
+from fib_sem_measurement_tool.core.measurement_cd_thk import CDMeasurementEngine
 from fib_sem_measurement_tool.core.measurement_taper import measure_double_taper, measure_single_taper
 from fib_sem_measurement_tool.core.roi_utils import normalize_roi
 from fib_sem_measurement_tool.models.result import MeasurementResult, MeasurementStatus
@@ -86,27 +86,14 @@ def run_measurement(image: np.ndarray, settings: MeasurementSettings) -> Measure
         if clean_roi is None:
             raise MeasurementRoiError("ROI is empty or too small")
 
-        if settings.measurement_type == "distance_horizontal":
-            result = MeasurementResult(
-                measurement_type=settings.measurement_type,
-                horizontal_cd=measure_horizontal_cd(gray, clean_roi, settings),
-            )
-        elif settings.measurement_type == "distance_vertical":
-            result = MeasurementResult(
-                measurement_type=settings.measurement_type,
-                vertical_thk=measure_vertical_thk(gray, clean_roi, settings),
-            )
-        elif settings.measurement_type == "distance_both":
-            horizontal = measure_horizontal_cd(gray, clean_roi, settings)
-            vertical = measure_vertical_thk(gray, clean_roi, settings, horizontal)
-            result = MeasurementResult(
-                measurement_type=settings.measurement_type,
-                horizontal_cd=horizontal,
-                vertical_thk=vertical,
-                warning_message="; ".join(
-                    item.warning_message for item in (horizontal, vertical) if item.warning_message
-                ),
-            )
+        if settings.measurement_type in {"distance_horizontal", "distance_vertical", "distance_both"}:
+            direction_by_type = {
+                "distance_horizontal": "horizontal",
+                "distance_vertical": "vertical",
+                "distance_both": getattr(settings, "measure_direction", "both"),
+            }
+            result = CDMeasurementEngine(settings).measure(gray, clean_roi, direction_by_type[settings.measurement_type])
+            result.measurement_type = settings.measurement_type
         elif settings.measurement_type == "taper_double":
             result = measure_double_taper(gray, clean_roi, settings)
             result.measurement_type = settings.measurement_type
