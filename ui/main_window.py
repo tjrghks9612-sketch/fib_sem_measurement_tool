@@ -28,7 +28,6 @@ from fib_sem_measurement_tool.models.settings import (
 from fib_sem_measurement_tool.ui.image_viewer import ImageViewer
 from fib_sem_measurement_tool.ui.option_panel import OptionPanel
 from fib_sem_measurement_tool.ui.profile_graph import ProfileGraph
-from fib_sem_measurement_tool.ui.result_table import ResultTable
 from fib_sem_measurement_tool.ui.thumbnail_panel import ThumbnailPanel
 
 
@@ -116,9 +115,6 @@ class MainWindow(ctk.CTk):
         self.option_panel.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
         self.option_panel.set_settings(self.global_settings)
         self.option_panel.set_candidate_summary(None, self.global_settings)
-
-        self.result_table = ResultTable(self)
-        self.result_table.pack(fill="x", padx=14, pady=(0, 8))
 
         status = ctk.CTkFrame(self, fg_color="#08111a")
         status.pack(fill="x", padx=18, pady=(0, 8))
@@ -260,6 +256,7 @@ class MainWindow(ctk.CTk):
             settings.measurement_type,
             settings.measure_direction,
             settings.distance_method,
+            settings.edge_scan_mode,
             settings.taper_side,
             round(float(settings.max_jump_px), 4),
             round(float(settings.base_height_pct), 4),
@@ -308,7 +305,7 @@ class MainWindow(ctk.CTk):
         self.thumbnail_panel.refresh(self.image_items, self.current_index, self.resolve_settings_for_item)
 
     def refresh_result_table(self) -> None:
-        self.result_table.refresh(self.image_items, self.resolve_settings_for_item)
+        return
 
     def schedule_thumbnail_panel_refresh(self) -> None:
         if self._thumbnail_refresh_after_id is not None:
@@ -341,6 +338,7 @@ class MainWindow(ctk.CTk):
             settings.measure_direction,
             settings.taper_side,
             settings.distance_method,
+            settings.edge_scan_mode,
             round(float(settings.minimum_grayscale_delta), 4),
             round(float(settings.max_jump_px), 4),
             round(float(settings.base_height_pct), 4),

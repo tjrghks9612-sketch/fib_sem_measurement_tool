@@ -177,6 +177,11 @@ def _fit_selected_boundary(
 
 
 def _taper_edge_direction(side: str, settings: MeasurementSettings) -> str:
+    edge_scan_mode = getattr(settings, "edge_scan_mode", "auto")
+    if edge_scan_mode == "outside_to_center":
+        return "right_to_center" if side == "right" else "left_to_center"
+    if edge_scan_mode == "center_to_outside":
+        return "center_to_right" if side == "right" else "center_to_left"
     if side == "right":
         return getattr(settings, "taper_right_edge_direction", "center_to_right")
     return getattr(settings, "taper_left_edge_direction", "center_to_left")

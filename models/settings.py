@@ -23,6 +23,14 @@ DISTANCE_METHODS = {
 
 DISTANCE_METHOD_BY_LABEL = {label: key for key, label in DISTANCE_METHODS.items()}
 
+EDGE_SCAN_MODES = {
+    "auto": "Auto",
+    "outside_to_center": "Outside -> Center",
+    "center_to_outside": "Center -> Outside",
+}
+
+EDGE_SCAN_MODE_BY_LABEL = {label: key for key, label in EDGE_SCAN_MODES.items()}
+
 MEASURE_DIRECTIONS = {
     "horizontal": "Horizontal",
     "vertical": "Vertical",
@@ -55,6 +63,7 @@ class MeasurementSettings:
     measure_direction: str = "both"
     taper_side: str = "left"
     distance_method: str = "mean"
+    edge_scan_mode: str = "auto"
     minimum_grayscale_delta: float = 30.0
     max_jump_px: float = 28.0
     base_height_pct: float = 50.0

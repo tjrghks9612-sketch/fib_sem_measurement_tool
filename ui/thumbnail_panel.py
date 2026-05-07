@@ -166,8 +166,12 @@ class ThumbnailPanel(ctk.CTkFrame):
             row=4, column=2, sticky="ew", padx=2, pady=(0, 8)
         )
 
-        for widget in (card, thumb, name):
-            widget.bind("<Button-1>", lambda _event, i=index: self.on_select_image(i))
+        self._bind_card_selection(card, index)
+
+    def _bind_card_selection(self, widget, index: int) -> None:
+        widget.bind("<Button-1>", lambda _event, i=index: self.on_select_image(i), add="+")
+        for child in widget.winfo_children():
+            self._bind_card_selection(child, index)
 
     def _toggle(self, index: int, var: tk.BooleanVar) -> None:
         self.items[index].selected = bool(var.get())
