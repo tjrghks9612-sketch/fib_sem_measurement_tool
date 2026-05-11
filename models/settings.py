@@ -74,6 +74,9 @@ class MeasurementSettings:
     max_profile_candidates_per_scanline: int = 16
     minimum_grayscale_delta: float = 30.0
     max_jump_px: float = 28.0
+    filter_cd_thk_by_boundary_angle: bool = False
+    max_cd_thk_boundary_angle_deg: float = 18.0
+    cd_thk_boundary_angle_window: int = 9
     base_height_pct: float = 50.0
     left_offset_pct: float = 0.0
     right_offset_pct: float = 0.0

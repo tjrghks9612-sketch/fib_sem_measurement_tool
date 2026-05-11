@@ -13,7 +13,8 @@ from fib_sem_measurement_tool.models.result import (
     RawEdgeCandidate,
     TaperSideResult,
 )
-from fib_sem_measurement_tool.models.settings import MEASUREMENT_TYPES, MeasurementSettings
+from fib_sem_measurement_tool.models.settings import MeasurementSettings
+from fib_sem_measurement_tool.ui.i18n import measurement_label, status_label, t, taper_side_label
 
 
 Color = Tuple[int, int, int]
@@ -193,11 +194,11 @@ def _draw_taper_height_guides(
         guide_half = int(max(36, min(86, abs(x2 - x1) * 0.18)))
         guide_x1 = max(x1, int(round(target_x)) - guide_half)
         guide_x2 = min(x2, int(round(target_x)) + guide_half)
-        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), (20, 20, 26), 5, cv2.LINE_AA)
+        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), (20, 20, 26), 6, cv2.LINE_AA)
         cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), TAPER_HEIGHT_COLOR, 2, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 7, (20, 20, 26), -1, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 4, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 8, TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 8, (20, 20, 26), -1, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 5, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 9, TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
 
 
 def _iter_raw_candidates(result: MeasurementResult) -> Iterable[RawEdgeCandidate]:
@@ -267,7 +268,7 @@ def _draw_distance(image: np.ndarray, result: DistanceResult, settings: Measurem
         _label(image, f"{label_prefix} {_format_value(result.selected_px, settings)}", (mid[0] + 8, mid[1] - 8), color)
 
 
-def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, settings: MeasurementSettings) -> None:
+def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, settings: MeasurementSettings, language: str) -> None:
     if settings.show_selected_edges:
         for candidate in taper.selected_boundary_candidates[:: max(1, len(taper.selected_boundary_candidates) // 36)]:
             point = (int(round(candidate.image_x)), int(round(candidate.image_y)))
@@ -276,27 +277,28 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
         p2 = (int(round(x2)), int(round(y2)))
-        cv2.line(image, p1, p2, color, 1, cv2.LINE_AA)
+        cv2.line(image, p1, p2, (20, 20, 26), 4, cv2.LINE_AA)
+        cv2.line(image, p1, p2, color, 2, cv2.LINE_AA)
         if settings.show_labels:
             angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
-            side = "좌측" if taper.side == "left" else "우측"
+            side = taper_side_label(language, taper.side)
             label_x = int(round(max(x1, x2) + 12 if taper.side == "left" else min(x1, x2) - 92))
             label_y = int(round(min(y1, y2) + 28))
-            _label(image, f"{side} 테이퍼 {angle:.1f} deg", (label_x, label_y), color, scale=0.44)
+            _label(image, f"{side} {t(language, 'taper')} {angle:.1f} deg", (label_x, label_y), color, scale=0.44)
 
 
-def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings) -> None:
+def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings, language: str) -> None:
     if not settings.show_labels:
         return
     rows = [("ROI", ROI_COLOR)]
     if settings.show_raw_candidates:
-        rows.append(("원시 후보", RAW_HORIZONTAL_COLOR))
+        rows.append((t(language, "raw_candidates"), RAW_HORIZONTAL_COLOR))
     if settings.show_selected_edges:
-        rows.append(("선택 경계", POINT_COLOR))
+        rows.append((t(language, "selected_edges"), POINT_COLOR))
     if settings.show_fit_line and result and (result.left_taper or result.right_taper):
-        rows.append(("피팅 선", TAPER_LEFT_COLOR))
+        rows.append((t(language, "fit_line"), TAPER_LEFT_COLOR))
     if settings.roi is not None and _taper_sides(settings):
-        rows.append(("테이퍼 높이", TAPER_HEIGHT_COLOR))
+        rows.append((t(language, "taper_height"), TAPER_HEIGHT_COLOR))
 
     x = max(12, image.shape[1] - 220)
     y = 16
@@ -311,27 +313,22 @@ def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], setting
         _draw_text(image, label, (x + 40, yy - 8), TEXT, 12)
 
 
-def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: MeasurementSettings) -> None:
+def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: MeasurementSettings, language: str) -> None:
     if not settings.show_labels:
         return
     status_color = THK_COLOR if result.status == "OK" else ROI_COLOR if result.status == "Check" else FAIL_COLOR
-    status_label = {
-        "OK": "정상",
-        "Check": "확인",
-        "Review Needed": "검토 필요",
-        "Fail": "실패",
-    }.get(result.status, result.status)
+    display_status = status_label(language, result.status)
     lines = [
-        f"{status_label} / 신뢰도 {result.overall_confidence:.0f}%",
-        MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type),
-        f"원시 경계 {result.raw_edge_count()} / 선택 포인트 {result.selected_point_count()}",
+        f"{display_status} / {t(language, 'confidence')} {result.overall_confidence:.0f}%",
+        measurement_label(language, settings.measurement_type),
+        f"{t(language, 'raw_edge_count')} {result.raw_edge_count()} / {t(language, 'selected_points')} {result.selected_point_count()}",
     ]
     if result.horizontal_cd and result.horizontal_cd.selected_px is not None:
         lines.append(f"CD {_format_value(result.horizontal_cd.selected_px, settings)}")
     if result.vertical_thk and result.vertical_thk.selected_px is not None:
         lines.append(f"THK {_format_value(result.vertical_thk.selected_px, settings)}")
     if result.avg_taper_angle is not None:
-        lines.append(f"평균 {result.avg_taper_angle:.1f} deg")
+        lines.append(f"{t(language, 'average_taper')} {result.avg_taper_angle:.1f} deg")
 
     x = 16
     y = 20
@@ -354,6 +351,7 @@ def draw_overlay(
     show_overlay: bool = True,
     calibration_line: Optional[Tuple[int, int, int, int]] = None,
     scale_bar_bbox: Optional[Tuple[int, int, int, int]] = None,
+    language: str = "ko",
 ) -> np.ndarray:
     canvas = image.copy()
     if not show_overlay:
@@ -367,12 +365,12 @@ def draw_overlay(
         x1, y1, x2, y2 = [int(v) for v in scale_bar_bbox]
         cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
         if settings.show_labels:
-            _label(canvas, "스케일바", (x1, y1 - 8), (255, 255, 90), scale=0.48)
+            _label(canvas, t(language, "scale_bar"), (x1, y1 - 8), (255, 255, 90), scale=0.48)
     if calibration_line:
         x1, y1, x2, y2 = [int(v) for v in calibration_line]
         cv2.line(canvas, (x1, y1), (x2, y2), (70, 220, 255), 2, cv2.LINE_AA)
         if settings.show_labels:
-            _label(canvas, "캘리브레이션 선", (x1, y1 - 8), (70, 220, 255), scale=0.48)
+            _label(canvas, t(language, "calibration_line"), (x1, y1 - 8), (70, 220, 255), scale=0.48)
 
     if result is not None:
         if settings.show_raw_candidates:
@@ -383,9 +381,9 @@ def draw_overlay(
             if result.vertical_thk:
                 _draw_distance(canvas, result.vertical_thk, settings, THK_COLOR, "THK")
         if result.left_taper:
-            _draw_taper(canvas, result.left_taper, TAPER_LEFT_COLOR, settings)
+            _draw_taper(canvas, result.left_taper, TAPER_LEFT_COLOR, settings, language)
         if result.right_taper:
-            _draw_taper(canvas, result.right_taper, TAPER_RIGHT_COLOR, settings)
-        _draw_summary(canvas, result, settings)
-    _draw_legend(canvas, result, settings)
+            _draw_taper(canvas, result.right_taper, TAPER_RIGHT_COLOR, settings, language)
+        _draw_summary(canvas, result, settings, language)
+    _draw_legend(canvas, result, settings, language)
     return canvas

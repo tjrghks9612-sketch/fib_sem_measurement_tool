@@ -22,12 +22,20 @@ from fib_sem_measurement_tool.core.roi_utils import normalize_roi
 from fib_sem_measurement_tool.export.csv_exporter import export_results_to_csv
 from fib_sem_measurement_tool.models.image_item import ImageItem
 from fib_sem_measurement_tool.models.settings import (
-    MEASUREMENT_TYPES,
     MeasurementSettings,
     default_global_settings,
     resolve_effective_settings,
 )
 from fib_sem_measurement_tool.ui.image_viewer import ImageViewer
+from fib_sem_measurement_tool.ui.i18n import (
+    LANGUAGES,
+    language_code,
+    language_label,
+    measurement_label,
+    settings_source_label,
+    status_label,
+    t,
+)
 from fib_sem_measurement_tool.ui.option_panel import OptionPanel
 from fib_sem_measurement_tool.ui.profile_graph import ProfileGraph
 from fib_sem_measurement_tool.ui.thumbnail_panel import ThumbnailPanel
@@ -38,7 +46,8 @@ class MainWindow(ctk.CTk):
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
-        self.title("FIB-SEM 측정 도구")
+        self.language = "ko"
+        self.title(t(self.language, "app_title"))
         self.geometry("1680x940")
         self.minsize(1280, 760)
 
@@ -61,8 +70,9 @@ class MainWindow(ctk.CTk):
         self.render_cache_limit = 4
         self.thumbnail_overlay_cache = OrderedDict()
         self.thumbnail_overlay_cache_limit = 32
-        self.status_var = ctk.StringVar(value="이미지를 불러오고 ROI를 드래그한 뒤 측정하세요.")
-        self.current_file_var = ctk.StringVar(value="선택된 파일 없음")
+        self.status_var = ctk.StringVar(value=t(self.language, "initial_status"))
+        self.current_file_var = ctk.StringVar(value=t(self.language, "current_file_none"))
+        self.language_var = ctk.StringVar(value=language_label(self.language))
 
         self._build()
 
@@ -70,15 +80,33 @@ class MainWindow(ctk.CTk):
         self.configure(fg_color="#08111a")
         toolbar = ctk.CTkFrame(self, fg_color="#08111a")
         toolbar.pack(fill="x", padx=14, pady=(10, 6))
-        ctk.CTkLabel(toolbar, text="FIB/SEM 측정 도구", font=ctk.CTkFont(size=20, weight="bold")).pack(side="left", padx=(4, 18))
+        self.toolbar_title_label = ctk.CTkLabel(toolbar, text=t(self.language, "toolbar_title"), font=ctk.CTkFont(size=20, weight="bold"))
+        self.toolbar_title_label.pack(side="left", padx=(4, 18))
         ctk.CTkLabel(toolbar, textvariable=self.current_file_var, text_color="#9dacbc").pack(side="left", padx=(0, 14))
-        ctk.CTkButton(toolbar, text="이미지 불러오기", width=140, command=self.load_images_dialog).pack(side="left", padx=4)
-        ctk.CTkButton(toolbar, text="폴더 불러오기", width=140, command=self.load_folder_dialog).pack(side="left", padx=4)
-        ctk.CTkButton(toolbar, text="이전", width=90, fg_color="#142234", command=self.previous_image).pack(side="left", padx=(18, 4))
-        ctk.CTkButton(toolbar, text="다음", width=90, fg_color="#142234", command=self.next_image).pack(side="left", padx=4)
-        ctk.CTkButton(toolbar, text="현재 측정", width=140, command=lambda: self.measure_scope("current")).pack(side="left", padx=(18, 4))
-        ctk.CTkButton(toolbar, text="전체 측정", width=120, fg_color="#203246", command=lambda: self.measure_scope("all")).pack(side="left", padx=4)
-        ctk.CTkButton(toolbar, text="CSV 저장", width=110, command=self.export_csv).pack(side="right", padx=4)
+        self.load_images_button = ctk.CTkButton(toolbar, text=t(self.language, "load_images"), width=140, command=self.load_images_dialog)
+        self.load_images_button.pack(side="left", padx=4)
+        self.load_folder_button = ctk.CTkButton(toolbar, text=t(self.language, "load_folder"), width=140, command=self.load_folder_dialog)
+        self.load_folder_button.pack(side="left", padx=4)
+        self.previous_button = ctk.CTkButton(toolbar, text=t(self.language, "previous"), width=90, fg_color="#142234", command=self.previous_image)
+        self.previous_button.pack(side="left", padx=(18, 4))
+        self.next_button = ctk.CTkButton(toolbar, text=t(self.language, "next"), width=90, fg_color="#142234", command=self.next_image)
+        self.next_button.pack(side="left", padx=4)
+        self.measure_current_button = ctk.CTkButton(toolbar, text=t(self.language, "measure_current"), width=140, command=lambda: self.measure_scope("current"))
+        self.measure_current_button.pack(side="left", padx=(18, 4))
+        self.measure_all_button = ctk.CTkButton(toolbar, text=t(self.language, "measure_all"), width=120, fg_color="#203246", command=lambda: self.measure_scope("all"))
+        self.measure_all_button.pack(side="left", padx=4)
+        self.csv_button = ctk.CTkButton(toolbar, text=t(self.language, "save_csv"), width=110, command=self.export_csv)
+        self.csv_button.pack(side="right", padx=4)
+        self.language_menu = ctk.CTkOptionMenu(
+            toolbar,
+            variable=self.language_var,
+            values=list(LANGUAGES.values()),
+            width=118,
+            command=self.on_language_changed,
+        )
+        self.language_menu.pack(side="right", padx=(4, 12))
+        self.language_label_widget = ctk.CTkLabel(toolbar, text=t(self.language, "language"), text_color="#9dacbc")
+        self.language_label_widget.pack(side="right", padx=(4, 4))
 
         main = ctk.CTkFrame(self, fg_color="#08111a")
         main.pack(fill="both", expand=True, padx=14, pady=(0, 8))
@@ -91,6 +119,7 @@ class MainWindow(ctk.CTk):
             main,
             on_select_image=self.select_image,
             on_selection_changed=lambda: None,
+            language=self.language,
         )
         self.thumbnail_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
@@ -105,9 +134,10 @@ class MainWindow(ctk.CTk):
             on_calibration_line=self.on_calibration_line,
             on_overlay_toggled=self.on_overlay_toggled,
             on_hover_profile=self.on_profile_hover,
+            language=self.language,
         )
         self.viewer.grid(row=0, column=0, sticky="nsew")
-        self.profile_graph = ProfileGraph(center)
+        self.profile_graph = ProfileGraph(center, language=self.language)
         self.profile_graph.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
 
         self.option_panel = OptionPanel(
@@ -115,6 +145,7 @@ class MainWindow(ctk.CTk):
             on_option_changed=self.on_option_changed,
             on_apply_calibration=self.apply_calibration_to_scope,
             on_detect_scale_bar=self.detect_current_scale_bar,
+            language=self.language,
         )
         self.option_panel.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
         self.option_panel.set_settings(self.global_settings)
@@ -128,28 +159,46 @@ class MainWindow(ctk.CTk):
         self.status_var.set(message)
 
     def _status_label(self, status: str) -> str:
-        return {
-            "OK": "정상",
-            "Check": "확인",
-            "Review Needed": "검토 필요",
-            "Fail": "실패",
-        }.get(status, status)
+        return status_label(self.language, status)
 
     def _settings_source_label(self, source: str) -> str:
-        return {
-            "global_default": "기본 설정",
-            "image_specific": "이미지별 설정",
-        }.get(source, source)
+        return settings_source_label(self.language, source)
+
+    def on_language_changed(self, label: str) -> None:
+        language = language_code(label)
+        if language == self.language:
+            return
+        self.language = language
+        self.title(t(self.language, "app_title"))
+        self.language_var.set(language_label(self.language))
+        self.toolbar_title_label.configure(text=t(self.language, "toolbar_title"))
+        self.load_images_button.configure(text=t(self.language, "load_images"))
+        self.load_folder_button.configure(text=t(self.language, "load_folder"))
+        self.previous_button.configure(text=t(self.language, "previous"))
+        self.next_button.configure(text=t(self.language, "next"))
+        self.measure_current_button.configure(text=t(self.language, "measure_current"))
+        self.measure_all_button.configure(text=t(self.language, "measure_all"))
+        self.csv_button.configure(text=t(self.language, "save_csv"))
+        self.language_label_widget.configure(text=t(self.language, "language"))
+        if self.current_item() is None:
+            self.current_file_var.set(t(self.language, "current_file_none"))
+            self.status_var.set(t(self.language, "initial_status"))
+        self.option_panel.set_language(self.language)
+        self.thumbnail_panel.set_language(self.language)
+        self.viewer.set_language(self.language)
+        self.profile_graph.set_language(self.language)
+        self.render_current_image(update_option_settings=False)
+        self.refresh_thumbnail_panel()
 
     def load_images_dialog(self) -> None:
         paths = filedialog.askopenfilenames(
-            title="FIB-SEM 이미지 선택",
-            filetypes=[("이미지 파일", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff"), ("모든 파일", "*.*")],
+            title=t(self.language, "image_file_dialog_title"),
+            filetypes=[(t(self.language, "image_files"), "*.png *.jpg *.jpeg *.bmp *.tif *.tiff"), (t(self.language, "all_files"), "*.*")],
         )
         self.add_image_paths(paths)
 
     def load_folder_dialog(self) -> None:
-        folder = filedialog.askdirectory(title="이미지 폴더 선택")
+        folder = filedialog.askdirectory(title=t(self.language, "folder_dialog_title"))
         if folder:
             self.add_image_paths(list_image_files(folder))
 
@@ -173,9 +222,9 @@ class MainWindow(ctk.CTk):
             self.current_index = 0
             self.load_current_image()
         self.refresh_all()
-        self.set_status(f"이미지 {added}개를 불러왔습니다." + (f" 실패 {len(errors)}개." if errors else ""))
+        self.set_status(t(self.language, "loaded_images").format(count=added) + (t(self.language, "load_failures").format(count=len(errors)) if errors else ""))
         if errors:
-            messagebox.showwarning("이미지 불러오기 실패", "\n".join(errors[:8]))
+            messagebox.showwarning(t(self.language, "load_image_failed"), "\n".join(errors[:8]))
 
     def resolve_settings_for_item(self, item: ImageItem) -> MeasurementSettings:
         return resolve_effective_settings(item, self.global_settings)
@@ -232,7 +281,7 @@ class MainWindow(ctk.CTk):
         if item is None:
             self.current_image = None
             self.current_image_path = ""
-            self.current_file_var.set("선택된 파일 없음")
+            self.current_file_var.set(t(self.language, "current_file_none"))
             self.viewer.clear()
             self.profile_graph.set_image(None)
             self._profile_image_path = ""
@@ -251,14 +300,14 @@ class MainWindow(ctk.CTk):
             return
         settings = self.resolve_settings_for_item(item)
         rendered = self.get_rendered_preview(item, settings)
-        measurement_label = MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type)
+        display_measurement_label = measurement_label(self.language, settings.measurement_type)
         status = (
             self._status_label(item.result.status) + f" {item.result.overall_confidence:.0f}%"
             if item.result
             else self._settings_source_label(settings.settings_source)
         )
         title = f"{item.file_name}"
-        meta = f"{measurement_label} | {self._settings_source_label(settings.settings_source)}"
+        meta = f"{display_measurement_label} | {self._settings_source_label(settings.settings_source)}"
         self.current_file_var.set(item.file_name)
         self.viewer.set_content(self.current_image, rendered, title, meta, status)
         self.profile_graph.set_context(self.current_image, settings, item.result)
@@ -287,6 +336,9 @@ class MainWindow(ctk.CTk):
             round(float(settings.normalize_high_percentile), 4),
             round(float(settings.normalize_min_span), 4),
             int(settings.max_profile_candidates_per_scanline),
+            bool(getattr(settings, "filter_cd_thk_by_boundary_angle", False)),
+            round(float(getattr(settings, "max_cd_thk_boundary_angle_deg", 18.0)), 4),
+            int(getattr(settings, "cd_thk_boundary_angle_window", 9)),
             settings.taper_side,
             round(float(settings.max_jump_px), 4),
             round(float(settings.base_height_pct), 4),
@@ -303,6 +355,7 @@ class MainWindow(ctk.CTk):
             settings.show_fit_line,
             settings.show_roi,
             settings.show_labels,
+            self.language,
             calibration_line,
             scale_bar_bbox,
         )
@@ -321,6 +374,7 @@ class MainWindow(ctk.CTk):
             show_overlay=self.overlay_enabled,
             calibration_line=self.calibration_lines.get(item.image_path),
             scale_bar_bbox=self.scale_bar_bboxes.get(item.image_path),
+            language=self.language,
         )
         self.render_cache[key] = rendered
         self.render_cache.move_to_end(key)
@@ -420,8 +474,9 @@ class MainWindow(ctk.CTk):
                 drawn_rows.add(target_y)
                 guide_half = max(12, min(28, int(abs(x2 - x1) * scale_x * 0.18)))
                 cx, cy = point(target_x, target_y)
-                draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(20, 20, 26), width=3)
+                draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(20, 20, 26), width=4)
                 draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(210, 190, 255), width=2)
+                draw.ellipse([(cx - 4, cy - 4), (cx + 4, cy + 4)], fill=(20, 20, 26))
                 draw.ellipse([(cx - 3, cy - 3), (cx + 3, cy + 3)], fill=(210, 190, 255), outline=(20, 20, 26))
 
         if result is not None and settings.show_selected_edges:
@@ -444,7 +499,8 @@ class MainWindow(ctk.CTk):
             ):
                 if taper is not None and settings.show_fit_line and taper.fit_line:
                     x1, y1, x2, y2 = taper.fit_line
-                    draw.line([point(x1, y1), point(x2, y2)], fill=color, width=1)
+                    draw.line([point(x1, y1), point(x2, y2)], fill=(20, 20, 26), width=3)
+                    draw.line([point(x1, y1), point(x2, y2)], fill=color, width=2)
         return thumb
 
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:
@@ -503,6 +559,9 @@ class MainWindow(ctk.CTk):
             int(settings.max_profile_candidates_per_scanline),
             round(float(settings.minimum_grayscale_delta), 4),
             round(float(settings.max_jump_px), 4),
+            bool(getattr(settings, "filter_cd_thk_by_boundary_angle", False)),
+            round(float(getattr(settings, "max_cd_thk_boundary_angle_deg", 18.0)), 4),
+            int(getattr(settings, "cd_thk_boundary_angle_window", 9)),
             round(float(settings.base_height_pct), 4),
             round(float(settings.left_offset_pct), 4),
             round(float(settings.right_offset_pct), 4),
@@ -562,7 +621,13 @@ class MainWindow(ctk.CTk):
         self.render_current_image(update_option_settings=False)
         self.schedule_thumbnail_panel_refresh()
         self.refresh_result_table()
-        self.set_status(f"옵션 변경: {item.file_name} / {self._status_label(item.result.status)} {item.result.overall_confidence:.0f}%")
+        self.set_status(
+            t(self.language, "option_changed").format(
+                file_name=item.file_name,
+                status=self._status_label(item.result.status),
+                confidence=item.result.overall_confidence,
+            )
+        )
 
     def on_roi_changed(self, roi) -> None:
         item = self.current_item()
@@ -570,13 +635,13 @@ class MainWindow(ctk.CTk):
             return
         clean_roi = normalize_roi(roi, item.image_size)
         if clean_roi is None:
-            self.set_status("ROI가 너무 작습니다.")
+            self.set_status(t(self.language, "roi_too_small"))
             return
         settings = self._ensure_item_settings(item, "image_specific")
         settings.roi = clean_roi
         settings.roi_source_image = item.file_name
         item.result = None
-        self.set_status("현재 이미지에 ROI를 적용했습니다.")
+        self.set_status(t(self.language, "roi_applied"))
         self.render_current_image()
         self.schedule_thumbnail_panel_refresh()
         if self.current_image is not None:
@@ -587,7 +652,7 @@ class MainWindow(ctk.CTk):
         if item is None:
             return
         self.calibration_lines[item.image_path] = line
-        self.set_status(f"수동 캘리브레이션 선: {length:.2f} px")
+        self.set_status(t(self.language, "manual_calibration_line").format(length=length))
         self.render_current_image()
 
     def on_overlay_toggled(self, enabled: bool) -> None:
@@ -606,13 +671,13 @@ class MainWindow(ctk.CTk):
             settings.calibration.mode = "auto"
             self.option_panel.set_detected_scale_bar(float(pixel_length))
             self.scale_bar_bboxes[item.image_path] = result.get("bbox")
-            self.set_status(f"스케일바 후보 검출: {pixel_length:.2f} px")
+            self.set_status(t(self.language, "scale_bar_detected").format(pixel_length=pixel_length))
         else:
             settings = self._ensure_item_settings(item, "image_specific")
             settings.calibration.detected_scale_bar_px = None
             self.option_panel.set_detected_scale_bar(None)
-            self.set_status(str(result.get("message", "스케일바 검출 실패")))
-            messagebox.showinfo("스케일바 검출", str(result.get("message", "스케일바 검출 실패")))
+            self.set_status(str(result.get("message", t(self.language, "scale_bar_failed"))))
+            messagebox.showinfo(t(self.language, "scale_bar_detection"), str(result.get("message", t(self.language, "scale_bar_failed"))))
         self.render_current_image()
 
     def _targets_for_scope(self, scope: str) -> List[ImageItem]:
@@ -650,16 +715,22 @@ class MainWindow(ctk.CTk):
         mode, pixel_length, actual_length, unit = self.option_panel.get_calibration_inputs()
         calibration = apply_calibration(pixel_length, actual_length, unit, mode=mode)
         if calibration.status != "calibrated":
-            messagebox.showwarning("캘리브레이션 실패", "스케일바 검출 또는 실제 길이 입력을 확인하세요.")
+            messagebox.showwarning(t(self.language, "calibration_failed"), t(self.language, "calibration_failed_message"))
             return
         item = self.current_item()
         if item is None:
             self.global_settings.calibration = calibration
-            self.set_status(f"기본 캘리브레이션 적용 ({calibration.px_to_real:.6g} {unit}/px)")
+            self.set_status(t(self.language, "default_calibration_applied").format(scale=calibration.px_to_real, unit=unit))
         else:
             settings = self._ensure_item_settings(item, "image_specific")
             settings.calibration = calibration
-            self.set_status(f"{item.file_name}: 캘리브레이션 적용 ({calibration.px_to_real:.6g} {unit}/px)")
+            self.set_status(
+                t(self.language, "image_calibration_applied").format(
+                    file_name=item.file_name,
+                    scale=calibration.px_to_real,
+                    unit=unit,
+                )
+            )
         self.render_current_image()
         self.schedule_thumbnail_panel_refresh()
 
@@ -675,7 +746,7 @@ class MainWindow(ctk.CTk):
             applied_roi_count = self._apply_current_settings_to_targets(targets)
         failures = 0
         for idx, item in enumerate(targets, start=1):
-            self.set_status(f"측정 중 {idx}/{len(targets)}: {item.file_name}")
+            self.set_status(t(self.language, "measuring").format(index=idx, total=len(targets), file_name=item.file_name))
             image = self.load_image_cached(item.image_path)
             settings = self.resolve_settings_for_item(item)
             item.result = run_measurement(image, settings)
@@ -684,8 +755,9 @@ class MainWindow(ctk.CTk):
         self.load_current_image()
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
-        roi_message = f" / ROI 적용 {applied_roi_count}개" if applied_roi_count else ""
-        self.set_status(f"이미지 {len(targets)}개 측정 완료." + roi_message + (f" / 실패 {failures}개" if failures else ""))
+        roi_message = t(self.language, "roi_applied_count").format(count=applied_roi_count) if applied_roi_count else ""
+        failure_message = t(self.language, "failures_count").format(count=failures) if failures else ""
+        self.set_status(t(self.language, "measurement_complete").format(count=len(targets)) + roi_message + failure_message)
 
     def export_csv(self) -> None:
         if not self.image_items:
@@ -698,5 +770,5 @@ class MainWindow(ctk.CTk):
         if not path:
             return
         export_results_to_csv(path, self.image_items, self.global_settings)
-        self.set_status(f"CSV 저장 완료: {path}")
-        messagebox.showinfo("CSV 저장", "결과 CSV를 저장했습니다.")
+        self.set_status(t(self.language, "csv_saved").format(path=path))
+        messagebox.showinfo(t(self.language, "csv_saved_title"), t(self.language, "csv_saved_message"))
