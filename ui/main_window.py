@@ -382,16 +382,16 @@ class MainWindow(ctk.CTk):
 
         result = item.result
 
-        def taper_target_y(side: str) -> float:
-            if settings.roi is None:
-                return 0.0
-            _x1, y1, _x2, y2 = settings.roi
-            taper = None
-            if result is not None:
-                taper = result.right_taper if side == "right" else result.left_taper
-            if taper is not None and taper.fit_line:
-                _fit_x1, fit_y1, _fit_x2, fit_y2 = taper.fit_line
-                y1, y2 = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
+        def taper_target_point(side: str) -> Optional[tuple[float, float]]:
+            if result is None:
+                return None
+            taper = result.right_taper if side == "right" else result.left_taper
+            if taper is None or not taper.fit_line:
+                return None
+            fit_x1, fit_y1, fit_x2, fit_y2 = taper.fit_line
+            y_min, y_max = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
+            if y_max - y_min <= 1e-6:
+                return float((fit_x1 + fit_x2) / 2.0), float(y_min)
             base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 50.0))))
             offset_pct = float(
                 getattr(settings, "right_offset_pct", 0.0)
@@ -399,7 +399,10 @@ class MainWindow(ctk.CTk):
                 else getattr(settings, "left_offset_pct", 0.0)
             )
             target_pct = max(0.0, min(100.0, base_pct + offset_pct))
-            return float(y2) - (float(y2 - y1) * target_pct / 100.0)
+            target_y = float(y_max) - (float(y_max - y_min) * target_pct / 100.0)
+            ratio = (target_y - float(fit_y1)) / (float(fit_y2) - float(fit_y1))
+            target_x = float(fit_x1) + (float(fit_x2) - float(fit_x1)) * ratio
+            return target_x, target_y
 
         if settings.roi is not None:
             x1, y1, x2, y2 = settings.roi
@@ -407,11 +410,18 @@ class MainWindow(ctk.CTk):
                 draw.rectangle([point(x1, y1), point(x2, y2)], outline=(0, 210, 255), width=1)
             drawn_rows = set()
             for side in taper_sides():
-                target_y = int(round(taper_target_y(side)))
+                target = taper_target_point(side)
+                if target is None:
+                    continue
+                target_x, target_y_float = target
+                target_y = int(round(target_y_float))
                 if target_y in drawn_rows:
                     continue
                 drawn_rows.add(target_y)
-                draw.line([point(x1, target_y), point(x2, target_y)], fill=(210, 190, 255), width=1)
+                guide_half = max(8, min(18, int(abs(x2 - x1) * scale_x * 0.10)))
+                cx, cy = point(target_x, target_y)
+                draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(210, 190, 255), width=1)
+                draw.ellipse([(cx - 2, cy - 2), (cx + 2, cy + 2)], fill=(210, 190, 255))
 
         if result is not None and settings.show_selected_edges:
             for measurement, color in (
