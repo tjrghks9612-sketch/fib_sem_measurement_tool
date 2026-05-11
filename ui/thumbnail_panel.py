@@ -38,6 +38,7 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.render_thumbnail: Callable[[ImageItem, MeasurementSettings], Optional[object]] = lambda item, settings: item.thumbnail
         self.image_refs = []
         self.visible_indices: List[int] = []
+        self.card_refs = {}
 
         self.type_filter = tk.StringVar(value=ALL_TYPES)
         self.status_filter = tk.StringVar(value=ALL_STATUSES)
@@ -114,6 +115,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             child.destroy()
         self.image_refs = []
         self.visible_indices = []
+        self.card_refs = {}
 
         for index, item in enumerate(self.items):
             settings = self.resolve_settings(item)
@@ -146,6 +148,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             corner_radius=6,
         )
         card.pack(fill="x", pady=5)
+        self.card_refs[index] = card
         card.grid_columnconfigure(2, weight=1)
         var = tk.BooleanVar(value=item.selected)
         check = ctk.CTkCheckBox(card, text="", width=22, variable=var, command=lambda i=index, v=var: self._toggle(i, v))
@@ -189,6 +192,21 @@ class ThumbnailPanel(ctk.CTkFrame):
         )
 
         self._bind_card_selection(card, index)
+
+    def set_current_index(self, current_index: int) -> None:
+        if current_index == self.current_index:
+            return
+        previous = self.current_index
+        self.current_index = current_index
+        for index in (previous, current_index):
+            card = self.card_refs.get(index)
+            if card is None:
+                continue
+            selected = index == current_index
+            card.configure(
+                border_color="#0a84ff" if selected else "#213243",
+                border_width=2 if selected else 1,
+            )
 
     def _bind_card_selection(self, widget, index: int) -> None:
         widget.bind("<Button-1>", lambda _event, i=index: self.on_select_image(i), add="+")

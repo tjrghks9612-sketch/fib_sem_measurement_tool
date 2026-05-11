@@ -191,9 +191,11 @@ class MainWindow(ctk.CTk):
         if index == self.current_index and self.current_image is not None:
             return
         self._cancel_auto_measure()
+        previous_index = self.current_index
         self.current_index = index
         self.load_current_image()
-        self.schedule_thumbnail_panel_refresh()
+        if previous_index != self.current_index:
+            self.thumbnail_panel.set_current_index(self.current_index)
 
     def previous_image(self) -> None:
         if not self.image_items:
@@ -242,7 +244,7 @@ class MainWindow(ctk.CTk):
             self._last_option_signature = None
         self.render_current_image()
 
-    def render_current_image(self) -> None:
+    def render_current_image(self, update_option_settings: bool = True) -> None:
         item = self.current_item()
         if item is None or self.current_image is None:
             self.viewer.clear()
@@ -259,12 +261,10 @@ class MainWindow(ctk.CTk):
         meta = f"{measurement_label} | {self._settings_source_label(settings.settings_source)}"
         self.current_file_var.set(item.file_name)
         self.viewer.set_content(self.current_image, rendered, title, meta, status)
-        if self._profile_image_path != item.image_path:
-            self.profile_graph.set_image(self.current_image)
-            self._profile_image_path = item.image_path
-        self.profile_graph.set_settings(settings)
-        self.profile_graph.set_result(item.result)
-        self.option_panel.set_settings(settings)
+        self.profile_graph.set_context(self.current_image, settings, item.result)
+        self._profile_image_path = item.image_path
+        if update_option_settings:
+            self.option_panel.set_settings(settings)
         self.option_panel.set_candidate_summary(item.result, settings)
 
     def _render_cache_key(self, item: ImageItem, settings: MeasurementSettings):
@@ -485,10 +485,10 @@ class MainWindow(ctk.CTk):
         item.settings = settings
         if settings.roi is not None and self.current_image is not None:
             item.result = None
-            self.render_current_image()
+            self.render_current_image(update_option_settings=False)
             self._schedule_current_auto_measure()
         else:
-            self.render_current_image()
+            self.render_current_image(update_option_settings=False)
             self.schedule_thumbnail_panel_refresh()
 
     def _schedule_current_auto_measure(self) -> None:
@@ -506,11 +506,11 @@ class MainWindow(ctk.CTk):
             return
         settings = self.resolve_settings_for_item(item)
         if settings.roi is None:
-            self.render_current_image()
-            self.refresh_thumbnail_panel()
+            self.render_current_image(update_option_settings=False)
+            self.schedule_thumbnail_panel_refresh()
             return
         item.result = run_measurement(self.current_image, settings)
-        self.render_current_image()
+        self.render_current_image(update_option_settings=False)
         self.schedule_thumbnail_panel_refresh()
         self.refresh_result_table()
         self.set_status(f"옵션 변경: {item.file_name} / {self._status_label(item.result.status)} {item.result.overall_confidence:.0f}%")
@@ -528,7 +528,8 @@ class MainWindow(ctk.CTk):
         settings.roi_source_image = item.file_name
         item.result = None
         self.set_status("현재 이미지에 ROI를 적용했습니다.")
-        self.refresh_all()
+        self.render_current_image()
+        self.schedule_thumbnail_panel_refresh()
         if self.current_image is not None:
             self._schedule_current_auto_measure()
 
@@ -605,7 +606,8 @@ class MainWindow(ctk.CTk):
             settings = self._ensure_item_settings(item, "image_specific")
             settings.calibration = calibration
             self.set_status(f"{item.file_name}: 캘리브레이션 적용 ({calibration.px_to_real:.6g} {unit}/px)")
-        self.refresh_all()
+        self.render_current_image()
+        self.schedule_thumbnail_panel_refresh()
 
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:
