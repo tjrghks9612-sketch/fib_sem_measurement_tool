@@ -538,6 +538,31 @@ class MainWindow(ctk.CTk):
             return list(self.image_items)
         return [item] if item else []
 
+    def _apply_current_settings_to_targets(self, targets: List[ImageItem]) -> int:
+        current = self.current_item()
+        if current is None:
+            return 0
+        current_settings = self.resolve_settings_for_item(current)
+        if current_settings.roi is None:
+            return 0
+
+        applied = 0
+        for item in targets:
+            settings = current_settings.clone()
+            roi = normalize_roi(current_settings.roi, item.image_size)
+            if roi is None:
+                continue
+            settings.roi = roi
+            settings.roi_source_image = current.file_name
+            settings.settings_source = "image_specific"
+            item.settings = settings
+            item.result = None
+            applied += 1
+        if applied:
+            self.render_cache.clear()
+            self.thumbnail_overlay_cache.clear()
+        return applied
+
     def apply_calibration_to_scope(self) -> None:
         mode, pixel_length, actual_length, unit = self.option_panel.get_calibration_inputs()
         calibration = apply_calibration(pixel_length, actual_length, unit, mode=mode)
@@ -561,6 +586,9 @@ class MainWindow(ctk.CTk):
         targets = self._targets_for_scope(scope)
         if not targets:
             return
+        applied_roi_count = 0
+        if scope == "all":
+            applied_roi_count = self._apply_current_settings_to_targets(targets)
         failures = 0
         for idx, item in enumerate(targets, start=1):
             self.set_status(f"측정 중 {idx}/{len(targets)}: {item.file_name}")
@@ -572,7 +600,8 @@ class MainWindow(ctk.CTk):
         self.load_current_image()
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
-        self.set_status(f"이미지 {len(targets)}개 측정 완료." + (f" / 실패 {failures}개" if failures else ""))
+        roi_message = f" / ROI 적용 {applied_roi_count}개" if applied_roi_count else ""
+        self.set_status(f"이미지 {len(targets)}개 측정 완료." + roi_message + (f" / 실패 {failures}개" if failures else ""))
 
     def export_csv(self) -> None:
         if not self.image_items:
