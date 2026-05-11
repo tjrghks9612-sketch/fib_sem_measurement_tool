@@ -190,12 +190,14 @@ def _draw_taper_height_guides(
         if target_y in drawn_rows:
             continue
         drawn_rows.add(target_y)
-        guide_half = int(max(18, min(48, abs(x2 - x1) * 0.10)))
+        guide_half = int(max(36, min(86, abs(x2 - x1) * 0.18)))
         guide_x1 = max(x1, int(round(target_x)) - guide_half)
         guide_x2 = min(x2, int(round(target_x)) + guide_half)
-        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
+        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), (20, 20, 26), 5, cv2.LINE_AA)
+        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), TAPER_HEIGHT_COLOR, 2, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 7, (20, 20, 26), -1, cv2.LINE_AA)
         cv2.circle(image, (int(round(target_x)), target_y), 4, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 6, (20, 20, 26), 1, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 8, TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
 
 
 def _iter_raw_candidates(result: MeasurementResult) -> Iterable[RawEdgeCandidate]:

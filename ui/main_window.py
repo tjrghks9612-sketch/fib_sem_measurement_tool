@@ -418,10 +418,11 @@ class MainWindow(ctk.CTk):
                 if target_y in drawn_rows:
                     continue
                 drawn_rows.add(target_y)
-                guide_half = max(8, min(18, int(abs(x2 - x1) * scale_x * 0.10)))
+                guide_half = max(12, min(28, int(abs(x2 - x1) * scale_x * 0.18)))
                 cx, cy = point(target_x, target_y)
-                draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(210, 190, 255), width=1)
-                draw.ellipse([(cx - 2, cy - 2), (cx + 2, cy + 2)], fill=(210, 190, 255))
+                draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(20, 20, 26), width=3)
+                draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(210, 190, 255), width=2)
+                draw.ellipse([(cx - 3, cy - 3), (cx + 3, cy + 3)], fill=(210, 190, 255), outline=(20, 20, 26))
 
         if result is not None and settings.show_selected_edges:
             for measurement, color in (
