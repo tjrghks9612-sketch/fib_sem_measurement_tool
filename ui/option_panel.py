@@ -37,6 +37,7 @@ class OptionPanel(ctk.CTkFrame):
         self.distance_method_var = tk.StringVar(value=DISTANCE_METHODS["mean"])
         self.edge_scan_mode_var = tk.StringVar(value=EDGE_SCAN_MODES["auto"])
         self.delta_var = tk.StringVar(value="30")
+        self.taper_height_var = tk.StringVar(value="50%")
         self.normalize_signal_var = tk.BooleanVar(value=False)
         self.denoise_signal_var = tk.BooleanVar(value=False)
         self.detected_px_var = tk.StringVar(value="")
@@ -80,6 +81,12 @@ class OptionPanel(ctk.CTkFrame):
         self.delta_slider = ctk.CTkSlider(row, from_=1, to=255, command=self._delta_changed)
         self.delta_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         ctk.CTkLabel(row, textvariable=self.delta_var, width=46, anchor="e", text_color="#dbe7f2").grid(row=0, column=2, sticky="e")
+        row = self._row("테이퍼 높이")
+        self.taper_height_slider = ctk.CTkSlider(row, from_=0, to=100, command=self._taper_height_changed)
+        self.taper_height_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(row, textvariable=self.taper_height_var, width=46, anchor="e", text_color="#dbe7f2").grid(
+            row=0, column=2, sticky="e"
+        )
 
         self._section_label("오버레이")
         self._switch_row("원시 후보", self.show_raw_var)
@@ -171,6 +178,12 @@ class OptionPanel(ctk.CTkFrame):
         if not self._loading:
             self._changed()
 
+    def _taper_height_changed(self, raw_value: float) -> None:
+        value = int(round(float(raw_value)))
+        self.taper_height_var.set(f"{value}%")
+        if not self._loading:
+            self._changed()
+
     def _changed(self) -> None:
         if not self._loading:
             self.on_option_changed()
@@ -190,6 +203,7 @@ class OptionPanel(ctk.CTkFrame):
         settings.normalize_grayscale_profiles = bool(self.normalize_signal_var.get())
         settings.denoise_grayscale_profiles = bool(self.denoise_signal_var.get())
         settings.minimum_grayscale_delta = self._float(self.delta_var.get(), settings.minimum_grayscale_delta)
+        settings.base_height_pct = self._float(self.taper_height_var.get().replace("%", ""), settings.base_height_pct)
         settings.calibration.unit = self.unit_var.get()
         settings.show_raw_candidates = bool(self.show_raw_var.get())
         settings.show_selected_edges = bool(self.show_selected_var.get())
@@ -218,6 +232,9 @@ class OptionPanel(ctk.CTkFrame):
         delta = max(1, min(255, int(round(float(settings.minimum_grayscale_delta)))))
         self.delta_var.set(str(delta))
         self.delta_slider.set(delta)
+        taper_height = max(0, min(100, int(round(float(getattr(settings, "base_height_pct", 50.0))))))
+        self.taper_height_var.set(f"{taper_height}%")
+        self.taper_height_slider.set(taper_height)
         self.show_raw_var.set(bool(settings.show_raw_candidates))
         self.show_selected_var.set(bool(settings.show_selected_edges))
         self.show_fit_var.set(bool(settings.show_fit_line))
