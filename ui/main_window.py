@@ -5,7 +5,9 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Dict, List, Optional
 
+import cv2
 import customtkinter as ctk
+from PIL import Image
 
 from fib_sem_measurement_tool.core.calibration import apply_calibration, detect_scale_bar
 from fib_sem_measurement_tool.core.image_io import (
@@ -57,6 +59,8 @@ class MainWindow(ctk.CTk):
         self.image_cache_limit = 8
         self.render_cache = OrderedDict()
         self.render_cache_limit = 4
+        self.thumbnail_overlay_cache = OrderedDict()
+        self.thumbnail_overlay_cache_limit = 32
         self.status_var = ctk.StringVar(value="이미지를 불러오고 ROI를 드래그한 뒤 측정하세요.")
         self.current_file_var = ctk.StringVar(value="선택된 파일 없음")
 
@@ -279,6 +283,7 @@ class MainWindow(ctk.CTk):
             settings.normalize_grayscale_profiles,
             settings.denoise_grayscale_profiles,
             settings.profile_denoise_window,
+            round(float(settings.profile_denoise_range_sigma), 4),
             round(float(settings.normalize_low_percentile), 4),
             round(float(settings.normalize_high_percentile), 4),
             round(float(settings.normalize_min_span), 4),
@@ -324,11 +329,57 @@ class MainWindow(ctk.CTk):
             self.render_cache.popitem(last=False)
         return rendered
 
+    def _thumbnail_overlay_cache_key(self, item: ImageItem, settings: MeasurementSettings):
+        return (
+            item.image_path,
+            id(item.result),
+            settings.roi,
+            settings.measurement_type,
+            settings.show_raw_candidates,
+            settings.show_selected_edges,
+            settings.show_fit_line,
+            settings.show_roi,
+            self.overlay_enabled,
+        )
+
+    def get_thumbnail_preview(self, item: ImageItem, settings: MeasurementSettings):
+        if settings.roi is None and item.result is None:
+            return item.thumbnail
+        key = self._thumbnail_overlay_cache_key(item, settings)
+        cached = self.thumbnail_overlay_cache.get(key)
+        if cached is not None:
+            self.thumbnail_overlay_cache.move_to_end(key)
+            return cached
+
+        image = self.load_image_cached(item.image_path)
+        thumb_settings = settings.clone()
+        thumb_settings.show_labels = False
+        rendered = draw_overlay(
+            image,
+            thumb_settings.roi,
+            item.result,
+            thumb_settings,
+            show_overlay=True,
+            calibration_line=self.calibration_lines.get(item.image_path),
+            scale_bar_bbox=self.scale_bar_bboxes.get(item.image_path),
+        )
+        pil = Image.fromarray(cv2.cvtColor(rendered, cv2.COLOR_BGR2RGB))
+        self.thumbnail_overlay_cache[key] = pil
+        self.thumbnail_overlay_cache.move_to_end(key)
+        while len(self.thumbnail_overlay_cache) > self.thumbnail_overlay_cache_limit:
+            self.thumbnail_overlay_cache.popitem(last=False)
+        return pil
+
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:
         self.profile_graph.update_cursor(x, y)
 
     def refresh_thumbnail_panel(self) -> None:
-        self.thumbnail_panel.refresh(self.image_items, self.current_index, self.resolve_settings_for_item)
+        self.thumbnail_panel.refresh(
+            self.image_items,
+            self.current_index,
+            self.resolve_settings_for_item,
+            self.get_thumbnail_preview,
+        )
 
     def refresh_result_table(self) -> None:
         return
@@ -368,6 +419,7 @@ class MainWindow(ctk.CTk):
             settings.normalize_grayscale_profiles,
             settings.denoise_grayscale_profiles,
             settings.profile_denoise_window,
+            round(float(settings.profile_denoise_range_sigma), 4),
             round(float(settings.normalize_low_percentile), 4),
             round(float(settings.normalize_high_percentile), 4),
             round(float(settings.normalize_min_span), 4),

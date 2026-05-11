@@ -7,7 +7,10 @@ import cv2
 import customtkinter as ctk
 import numpy as np
 
-from fib_sem_measurement_tool.core.grayscale_line_scan import prepare_display_profile_signal
+from fib_sem_measurement_tool.core.grayscale_line_scan import (
+    prepare_display_profile_from_roi,
+    prepare_display_profile_signal,
+)
 from fib_sem_measurement_tool.core.profile_markers import collect_profile_edge_markers
 from fib_sem_measurement_tool.models.result import MeasurementResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
@@ -89,9 +92,11 @@ class ProfileGraph(ctk.CTkFrame):
 
     def set_settings(self, settings: MeasurementSettings) -> None:
         signature = (
+            settings.roi,
             bool(getattr(settings, "normalize_grayscale_profiles", False)),
             bool(getattr(settings, "denoise_grayscale_profiles", False)),
             int(getattr(settings, "profile_denoise_window", 3)),
+            round(float(getattr(settings, "profile_denoise_range_sigma", 28.0)), 4),
             round(float(getattr(settings, "normalize_low_percentile", 2.0)), 4),
             round(float(getattr(settings, "normalize_high_percentile", 98.0)), 4),
             round(float(getattr(settings, "normalize_min_span", 12.0)), 4),
@@ -140,7 +145,10 @@ class ProfileGraph(ctk.CTkFrame):
             mode_text.append("정규화")
         if bool(getattr(self.settings, "denoise_grayscale_profiles", False)):
             mode_text.append("스무딩")
-        suffix = f" / 그래프: {'+'.join(mode_text)}" if mode_text else ""
+        basis = "ROI" if self.settings.roi is not None else "전체"
+        suffix = f" / 그래프: {basis} 기준"
+        if mode_text:
+            suffix += f" {'+'.join(mode_text)}"
         self.coord_var.set(f"x={x}, y={y}, 원본={int(self.gray[y, x])}{suffix}")
         self._draw_graph()
 
@@ -200,9 +208,26 @@ class ProfileGraph(ctk.CTkFrame):
             "R taper": "우 테이퍼",
         }.get(label, label)
 
-    def _draw_edge_markers(self, axis: str, scan_index: int, profile: np.ndarray, width: int, height: int) -> None:
+    def _draw_edge_markers(
+        self,
+        axis: str,
+        scan_index: int,
+        profile: np.ndarray,
+        width: int,
+        height: int,
+        position_offset: int = 0,
+    ) -> None:
         for idx, marker in enumerate(collect_profile_edge_markers(self.result, axis, scan_index)):
-            self._draw_edge_marker(profile, marker.position, marker.label, width, height, idx)
+            self._draw_edge_marker(profile, marker.position - position_offset, marker.label, width, height, idx)
+
+    def _profile_for_axis(self, axis: str, scan_index: int) -> tuple[np.ndarray, int, int]:
+        if self.gray is None:
+            return np.asarray([], dtype=np.float32), 0, scan_index
+        if self.settings.roi is not None:
+            return prepare_display_profile_from_roi(self.gray, self.settings.roi, axis, scan_index, self.settings)
+        if axis == "horizontal":
+            return prepare_display_profile_signal(self.gray[scan_index, :], "horizontal", self.settings), 0, scan_index
+        return prepare_display_profile_signal(self.gray[:, scan_index], "vertical", self.settings), 0, scan_index
 
     def _draw_graph(self) -> None:
         self.canvas.delete("all")
@@ -224,14 +249,14 @@ class ProfileGraph(ctk.CTkFrame):
         x, y = self.cursor
         mode = self.mode_var.get()
         if mode in ("둘 다", "가로"):
-            horizontal = prepare_display_profile_signal(self.gray[y, :], "horizontal", self.settings)
+            horizontal, offset, scan_index = self._profile_for_axis("horizontal", y)
             step = max(1, int(len(horizontal) / max(width, 1)))
             self._draw_polyline(self._profile_points(horizontal, width, height), "#38a8ff", step)
-            self._draw_edge_markers("horizontal", y, horizontal, width, height)
+            self._draw_edge_markers("horizontal", scan_index, horizontal, width, height, offset)
             self.canvas.create_text(width - 8, 14, text="가로", fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
         if mode in ("둘 다", "세로"):
-            vertical = prepare_display_profile_signal(self.gray[:, x], "vertical", self.settings)
+            vertical, offset, scan_index = self._profile_for_axis("vertical", x)
             step = max(1, int(len(vertical) / max(width, 1)))
             self._draw_polyline(self._profile_points(vertical, width, height), "#61f27a", step)
-            self._draw_edge_markers("vertical", x, vertical, width, height)
+            self._draw_edge_markers("vertical", scan_index, vertical, width, height, offset)
             self.canvas.create_text(width - 8, 30, text="세로", fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))

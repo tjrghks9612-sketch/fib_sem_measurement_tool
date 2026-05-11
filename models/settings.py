@@ -66,7 +66,8 @@ class MeasurementSettings:
     edge_scan_mode: str = "auto"
     normalize_grayscale_profiles: bool = False
     denoise_grayscale_profiles: bool = False
-    profile_denoise_window: int = 3
+    profile_denoise_window: int = 11
+    profile_denoise_range_sigma: float = 28.0
     normalize_low_percentile: float = 2.0
     normalize_high_percentile: float = 98.0
     normalize_min_span: float = 12.0
