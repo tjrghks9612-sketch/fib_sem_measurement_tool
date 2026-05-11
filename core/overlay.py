@@ -28,6 +28,7 @@ CD_COLOR: Color = (255, 164, 55)
 THK_COLOR: Color = (80, 245, 120)
 TAPER_LEFT_COLOR: Color = (255, 220, 75)
 TAPER_RIGHT_COLOR: Color = (255, 145, 85)
+TAPER_HEIGHT_COLOR: Color = (210, 190, 255)
 POINT_COLOR: Color = (245, 250, 255)
 FAIL_COLOR: Color = (80, 105, 255)
 
@@ -122,6 +123,49 @@ def _format_value(px_value: Optional[float], settings: MeasurementSettings) -> s
         return "-"
     value = px_value * settings.calibration.px_to_real
     return f"{value:.3g} {settings.calibration.unit}"
+
+
+def _clamp_pct(value: float) -> float:
+    return max(0.0, min(100.0, float(value)))
+
+
+def _taper_target_y(roi: Sequence[int], side: str, settings: MeasurementSettings) -> float:
+    _x1, y1, _x2, y2 = [int(v) for v in roi]
+    base_pct = float(getattr(settings, "base_height_pct", 50.0))
+    offset_pct = float(
+        getattr(settings, "right_offset_pct", 0.0)
+        if side == "right"
+        else getattr(settings, "left_offset_pct", 0.0)
+    )
+    target_pct = _clamp_pct(base_pct + offset_pct)
+    return float(y1) + (float(y2 - y1) * target_pct / 100.0)
+
+
+def _taper_sides(settings: MeasurementSettings) -> tuple[str, ...]:
+    if settings.measurement_type == "taper_double":
+        return ("left", "right")
+    if settings.measurement_type == "taper_single":
+        return (settings.taper_side if settings.taper_side in ("left", "right") else "left",)
+    return ()
+
+
+def _draw_taper_height_guides(image: np.ndarray, roi: Sequence[int], settings: MeasurementSettings) -> None:
+    sides = _taper_sides(settings)
+    if not sides:
+        return
+    x1, _y1, x2, _y2 = [int(v) for v in roi]
+    drawn_rows: set[int] = set()
+    for side in sides:
+        target_y = int(round(_taper_target_y(roi, side, settings)))
+        if target_y in drawn_rows:
+            continue
+        drawn_rows.add(target_y)
+        _draw_dashed_line(image, (x1, target_y), (x2, target_y), TAPER_HEIGHT_COLOR, 1, dash=6)
+        cv2.circle(image, (x1, target_y), 3, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(image, (x2, target_y), 3, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
+        if settings.show_labels:
+            pct = int(round(float(getattr(settings, "base_height_pct", 50.0))))
+            _label(image, f"테이퍼 높이 {pct}%", (x1 + 8, target_y - 8), TAPER_HEIGHT_COLOR, scale=0.44)
 
 
 def _iter_raw_candidates(result: MeasurementResult) -> Iterable[RawEdgeCandidate]:
@@ -219,6 +263,8 @@ def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], setting
         rows.append(("선택 경계", POINT_COLOR))
     if settings.show_fit_line and result and (result.left_taper or result.right_taper):
         rows.append(("피팅 선", TAPER_LEFT_COLOR))
+    if settings.roi is not None and _taper_sides(settings):
+        rows.append(("테이퍼 높이", TAPER_HEIGHT_COLOR))
 
     x = max(12, image.shape[1] - 220)
     y = 16
@@ -283,6 +329,8 @@ def draw_overlay(
 
     if roi is not None and settings.show_roi:
         _draw_dashed_rect(canvas, roi, ROI_COLOR, settings.show_labels)
+    if roi is not None:
+        _draw_taper_height_guides(canvas, roi, settings)
     if scale_bar_bbox:
         x1, y1, x2, y2 = [int(v) for v in scale_bar_bbox]
         cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)

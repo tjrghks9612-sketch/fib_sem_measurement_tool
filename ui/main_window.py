@@ -370,9 +370,37 @@ class MainWindow(ctk.CTk):
         def point(x: float, y: float) -> tuple[int, int]:
             return int(round(x * scale_x)), int(round(y * scale_y))
 
-        if settings.roi is not None and settings.show_roi:
+        def taper_sides() -> tuple[str, ...]:
+            if settings.measurement_type == "taper_double":
+                return ("left", "right")
+            if settings.measurement_type == "taper_single":
+                return (settings.taper_side if settings.taper_side in ("left", "right") else "left",)
+            return ()
+
+        def taper_target_y(side: str) -> float:
+            if settings.roi is None:
+                return 0.0
+            _x1, y1, _x2, y2 = settings.roi
+            base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 50.0))))
+            offset_pct = float(
+                getattr(settings, "right_offset_pct", 0.0)
+                if side == "right"
+                else getattr(settings, "left_offset_pct", 0.0)
+            )
+            target_pct = max(0.0, min(100.0, base_pct + offset_pct))
+            return float(y1) + (float(y2 - y1) * target_pct / 100.0)
+
+        if settings.roi is not None:
             x1, y1, x2, y2 = settings.roi
-            draw.rectangle([point(x1, y1), point(x2, y2)], outline=(0, 210, 255), width=1)
+            if settings.show_roi:
+                draw.rectangle([point(x1, y1), point(x2, y2)], outline=(0, 210, 255), width=1)
+            drawn_rows = set()
+            for side in taper_sides():
+                target_y = int(round(taper_target_y(side)))
+                if target_y in drawn_rows:
+                    continue
+                drawn_rows.add(target_y)
+                draw.line([point(x1, target_y), point(x2, target_y)], fill=(210, 190, 255), width=1)
 
         result = item.result
         if result is not None and settings.show_selected_edges:
