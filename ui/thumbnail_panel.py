@@ -198,7 +198,8 @@ class ThumbnailPanel(ctk.CTkFrame):
     def _toggle(self, index: int, var: tk.BooleanVar) -> None:
         self.items[index].selected = bool(var.get())
         self.on_selection_changed()
-        self._refresh_cards()
+        selected_count = sum(1 for item in self.items if item.selected)
+        self.selection_var.set(f"{selected_count} / {len(self.items)}")
 
     def select_all_visible(self) -> None:
         for index in self.visible_indices:
