@@ -8,7 +8,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
     scan_pair_candidates,
 )
 from fib_sem_measurement_tool.core.measurement_cd_thk import measure_horizontal_cd, measure_vertical_thk
-from fib_sem_measurement_tool.core.measurement_taper import measure_single_taper
+from fib_sem_measurement_tool.core.measurement_taper import _target_y_for_side, measure_single_taper
 from fib_sem_measurement_tool.models.result import EdgeScanResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -101,6 +101,18 @@ class GrayscaleLineScanTest(unittest.TestCase):
         self.assertNotEqual(result.left_taper.status, "Fail")
         self.assertGreaterEqual(result.left_taper.valid_point_count, 5)
         self.assertAlmostEqual(result.left_taper.angle_vertical, 11.3, delta=3.0)
+
+    def test_taper_height_percentage_maps_lower_values_to_lower_rows(self) -> None:
+        settings = make_settings()
+        roi = (20, 20, 179, 139)
+
+        settings.base_height_pct = 0.0
+        lower_y = _target_y_for_side(roi, "left", settings)
+        settings.base_height_pct = 100.0
+        upper_y = _target_y_for_side(roi, "left", settings)
+
+        self.assertAlmostEqual(lower_y, 139.0)
+        self.assertAlmostEqual(upper_y, 20.0)
 
 
 if __name__ == "__main__":

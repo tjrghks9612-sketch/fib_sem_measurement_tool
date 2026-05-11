@@ -57,7 +57,7 @@ def _target_y_for_side(roi: Sequence[int], side: str, settings: MeasurementSetti
         else getattr(settings, "left_offset_pct", 0.0)
     )
     target_pct = _clamp_pct(base_pct + offset_pct)
-    return float(y1) + (float(y2 - y1) * target_pct / 100.0)
+    return float(y2) - (float(y2 - y1) * target_pct / 100.0)
 
 
 def _fit_points_near_target(points: np.ndarray, target_y: float, roi: Sequence[int]) -> np.ndarray:

@@ -31,6 +31,7 @@ class OptionPanel(ctk.CTkFrame):
         self.on_apply_calibration = on_apply_calibration
         self.on_detect_scale_bar = on_detect_scale_bar
         self._loading = False
+        self._slider_change_after_id = None
 
         self.measurement_type_var = tk.StringVar(value=MEASUREMENT_TYPES["distance_both"])
         self.taper_side_var = tk.StringVar(value="left")
@@ -176,13 +177,25 @@ class OptionPanel(ctk.CTkFrame):
         value = int(round(float(raw_value)))
         self.delta_var.set(str(value))
         if not self._loading:
-            self._changed()
+            self._schedule_slider_changed()
 
     def _taper_height_changed(self, raw_value: float) -> None:
         value = int(round(float(raw_value)))
         self.taper_height_var.set(f"{value}%")
         if not self._loading:
-            self._changed()
+            self._schedule_slider_changed()
+
+    def _schedule_slider_changed(self) -> None:
+        if self._slider_change_after_id is not None:
+            try:
+                self.after_cancel(self._slider_change_after_id)
+            except ValueError:
+                pass
+        self._slider_change_after_id = self.after(120, self._flush_slider_changed)
+
+    def _flush_slider_changed(self) -> None:
+        self._slider_change_after_id = None
+        self._changed()
 
     def _changed(self) -> None:
         if not self._loading:

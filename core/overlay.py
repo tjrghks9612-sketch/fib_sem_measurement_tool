@@ -129,8 +129,7 @@ def _clamp_pct(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
 
 
-def _taper_target_y(roi: Sequence[int], side: str, settings: MeasurementSettings) -> float:
-    _x1, y1, _x2, y2 = [int(v) for v in roi]
+def _taper_target_y(y_min: float, y_max: float, side: str, settings: MeasurementSettings) -> float:
     base_pct = float(getattr(settings, "base_height_pct", 50.0))
     offset_pct = float(
         getattr(settings, "right_offset_pct", 0.0)
@@ -138,7 +137,7 @@ def _taper_target_y(roi: Sequence[int], side: str, settings: MeasurementSettings
         else getattr(settings, "left_offset_pct", 0.0)
     )
     target_pct = _clamp_pct(base_pct + offset_pct)
-    return float(y1) + (float(y2 - y1) * target_pct / 100.0)
+    return float(y_max) - (float(y_max - y_min) * target_pct / 100.0)
 
 
 def _taper_sides(settings: MeasurementSettings) -> tuple[str, ...]:
@@ -149,14 +148,31 @@ def _taper_sides(settings: MeasurementSettings) -> tuple[str, ...]:
     return ()
 
 
-def _draw_taper_height_guides(image: np.ndarray, roi: Sequence[int], settings: MeasurementSettings) -> None:
+def _taper_for_side(result: Optional[MeasurementResult], side: str) -> Optional[TaperSideResult]:
+    if result is None:
+        return None
+    return result.right_taper if side == "right" else result.left_taper
+
+
+def _draw_taper_height_guides(
+    image: np.ndarray,
+    roi: Sequence[int],
+    settings: MeasurementSettings,
+    result: Optional[MeasurementResult],
+) -> None:
     sides = _taper_sides(settings)
     if not sides:
         return
-    x1, _y1, x2, _y2 = [int(v) for v in roi]
+    x1, y1, x2, y2 = [int(v) for v in roi]
     drawn_rows: set[int] = set()
     for side in sides:
-        target_y = int(round(_taper_target_y(roi, side, settings)))
+        taper = _taper_for_side(result, side)
+        if taper is not None and taper.fit_line:
+            _fit_x1, fit_y1, _fit_x2, fit_y2 = taper.fit_line
+            y_min, y_max = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
+        else:
+            y_min, y_max = float(y1), float(y2)
+        target_y = int(round(_taper_target_y(y_min, y_max, side, settings)))
         if target_y in drawn_rows:
             continue
         drawn_rows.add(target_y)
@@ -239,8 +255,7 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
     if settings.show_selected_edges:
         for candidate in taper.selected_boundary_candidates:
             point = (int(round(candidate.image_x)), int(round(candidate.image_y)))
-            cv2.circle(image, point, 3, POINT_COLOR, -1, cv2.LINE_AA)
-            cv2.circle(image, point, 5, color, 1, cv2.LINE_AA)
+            cv2.circle(image, point, 1, POINT_COLOR, -1, cv2.LINE_AA)
     if settings.show_fit_line and taper.fit_line:
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
@@ -330,7 +345,7 @@ def draw_overlay(
     if roi is not None and settings.show_roi:
         _draw_dashed_rect(canvas, roi, ROI_COLOR, settings.show_labels)
     if roi is not None:
-        _draw_taper_height_guides(canvas, roi, settings)
+        _draw_taper_height_guides(canvas, roi, settings, result)
     if scale_bar_bbox:
         x1, y1, x2, y2 = [int(v) for v in scale_bar_bbox]
         cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
