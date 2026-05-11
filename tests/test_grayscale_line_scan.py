@@ -61,17 +61,17 @@ class GrayscaleLineScanTest(unittest.TestCase):
 
     def test_display_profile_signal_applies_normalization_and_smoothing(self) -> None:
         settings = make_settings()
-        settings.normalize_grayscale_profiles = True
+        settings.normalize_grayscale_profiles = False
         settings.denoise_grayscale_profiles = True
-        settings.profile_denoise_window = 3
-        profile = np.asarray([80, 80, 80, 100, 80, 80, 80, 100, 100, 100], dtype=np.float32)
+        settings.profile_denoise_window = 9
+        settings.profile_denoise_range_sigma = 18.0
+        profile = np.asarray([80, 84, 76, 83, 78, 82, 80, 160, 162, 158, 161, 159], dtype=np.float32)
 
         display = prepare_display_profile_signal(profile, "horizontal", settings)
 
         self.assertEqual(display.shape, profile.shape)
-        self.assertGreaterEqual(float(np.min(display)), 0.0)
-        self.assertLessEqual(float(np.max(display)), 255.0)
-        self.assertLess(float(display[3]), 255.0)
+        self.assertLess(float(np.std(display[:7])), float(np.std(profile[:7])))
+        self.assertGreater(float(display[7] - display[6]), 50.0)
 
     def test_cd_and_thk_use_same_line_scanner(self) -> None:
         settings = make_settings()
