@@ -551,10 +551,15 @@ class MainWindow(ctk.CTk):
         result = detect_scale_bar(self.current_image)
         if result.get("status") == "detected":
             pixel_length = result.get("pixel_length")
+            settings = self._ensure_item_settings(item, "image_specific")
+            settings.calibration.detected_scale_bar_px = float(pixel_length)
+            settings.calibration.mode = "auto"
             self.option_panel.set_detected_scale_bar(float(pixel_length))
             self.scale_bar_bboxes[item.image_path] = result.get("bbox")
             self.set_status(f"스케일바 후보 검출: {pixel_length:.2f} px")
         else:
+            settings = self._ensure_item_settings(item, "image_specific")
+            settings.calibration.detected_scale_bar_px = None
             self.option_panel.set_detected_scale_bar(None)
             self.set_status(str(result.get("message", "스케일바 검출 실패")))
             messagebox.showinfo("스케일바 검출", str(result.get("message", "스케일바 검출 실패")))
