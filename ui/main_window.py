@@ -395,7 +395,7 @@ class MainWindow(ctk.CTk):
             ):
                 if taper is not None and settings.show_fit_line and taper.fit_line:
                     x1, y1, x2, y2 = taper.fit_line
-                    draw.line([point(x1, y1), point(x2, y2)], fill=color, width=2)
+                    draw.line([point(x1, y1), point(x2, y2)], fill=color, width=1)
         return thumb
 
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:

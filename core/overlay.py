@@ -201,7 +201,7 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
         p2 = (int(round(x2)), int(round(y2)))
-        cv2.line(image, p1, p2, color, 2, cv2.LINE_AA)
+        cv2.line(image, p1, p2, color, 1, cv2.LINE_AA)
         if settings.show_labels:
             angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
             mid = (int(round((x1 + x2) / 2)), int(round((y1 + y2) / 2)))
