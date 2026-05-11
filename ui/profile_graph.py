@@ -38,7 +38,33 @@ class ProfileGraph(ctk.CTkFrame):
         self._pending_cursor: Optional[Tuple[Optional[int], Optional[int]]] = None
         self._draw_after_id = None
         self._last_drawn_cursor: Optional[Tuple[int, int]] = None
+        self._suspend_draw = False
+        self._draw_dirty = False
         self._build()
+
+    def _request_draw(self) -> None:
+        if self._suspend_draw:
+            self._draw_dirty = True
+            return
+        self._draw_graph()
+
+    def set_context(
+        self,
+        image_bgr,
+        settings: MeasurementSettings,
+        result: Optional[MeasurementResult],
+    ) -> None:
+        self._suspend_draw = True
+        self._draw_dirty = False
+        try:
+            self.set_image(image_bgr)
+            self.set_settings(settings)
+            self.set_result(result)
+        finally:
+            self._suspend_draw = False
+        if self._draw_dirty:
+            self._draw_dirty = False
+            self._draw_graph()
 
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -67,7 +93,7 @@ class ProfileGraph(ctk.CTkFrame):
             self._result_id = None
             self._last_drawn_cursor = None
             self.coord_var.set("이미지 없음")
-            self._draw_graph()
+            self._request_draw()
             return
         image_id = (id(image_bgr), image_bgr.shape)
         if image_id == self._image_id:
@@ -80,7 +106,7 @@ class ProfileGraph(ctk.CTkFrame):
         self.cursor = None
         self._last_drawn_cursor = None
         self.coord_var.set("이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
-        self._draw_graph()
+        self._request_draw()
 
     def set_result(self, result: Optional[MeasurementResult]) -> None:
         result_id = id(result) if result is not None else None
@@ -88,7 +114,7 @@ class ProfileGraph(ctk.CTkFrame):
             return
         self.result = result
         self._result_id = result_id
-        self._draw_graph()
+        self._request_draw()
 
     def set_settings(self, settings: MeasurementSettings) -> None:
         signature = (
@@ -106,7 +132,7 @@ class ProfileGraph(ctk.CTkFrame):
         self.settings = settings.clone()
         self._settings_signature = signature
         self._last_drawn_cursor = None
-        self._draw_graph()
+        self._request_draw()
 
     def clear_cursor(self) -> None:
         if self.cursor is None and self._pending_cursor == (None, None):
