@@ -154,6 +154,19 @@ def _taper_for_side(result: Optional[MeasurementResult], side: str) -> Optional[
     return result.right_taper if side == "right" else result.left_taper
 
 
+def _taper_fit_target_point(taper: TaperSideResult, settings: MeasurementSettings) -> Optional[tuple[float, float]]:
+    if not taper.fit_line:
+        return None
+    x1, y1, x2, y2 = taper.fit_line
+    y_min, y_max = min(float(y1), float(y2)), max(float(y1), float(y2))
+    if y_max - y_min <= 1e-6:
+        return float((x1 + x2) / 2.0), float(y_min)
+    target_y = _taper_target_y(y_min, y_max, taper.side, settings)
+    ratio = (target_y - float(y1)) / (float(y2) - float(y1))
+    target_x = float(x1) + (float(x2) - float(x1)) * ratio
+    return target_x, target_y
+
+
 def _draw_taper_height_guides(
     image: np.ndarray,
     roi: Sequence[int],
@@ -167,21 +180,22 @@ def _draw_taper_height_guides(
     drawn_rows: set[int] = set()
     for side in sides:
         taper = _taper_for_side(result, side)
-        if taper is not None and taper.fit_line:
-            _fit_x1, fit_y1, _fit_x2, fit_y2 = taper.fit_line
-            y_min, y_max = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
-        else:
-            y_min, y_max = float(y1), float(y2)
-        target_y = int(round(_taper_target_y(y_min, y_max, side, settings)))
+        if taper is None:
+            continue
+        target = _taper_fit_target_point(taper, settings)
+        if target is None:
+            continue
+        target_x, target_y_float = target
+        target_y = int(round(target_y_float))
         if target_y in drawn_rows:
             continue
         drawn_rows.add(target_y)
-        _draw_dashed_line(image, (x1, target_y), (x2, target_y), TAPER_HEIGHT_COLOR, 1, dash=6)
-        cv2.circle(image, (x1, target_y), 3, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
-        cv2.circle(image, (x2, target_y), 3, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
-        if settings.show_labels:
-            pct = int(round(float(getattr(settings, "base_height_pct", 50.0))))
-            _label(image, f"테이퍼 높이 {pct}%", (x1 + 8, target_y - 8), TAPER_HEIGHT_COLOR, scale=0.44)
+        guide_half = int(max(18, min(48, abs(x2 - x1) * 0.10)))
+        guide_x1 = max(x1, int(round(target_x)) - guide_half)
+        guide_x2 = min(x2, int(round(target_x)) + guide_half)
+        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 4, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(image, (int(round(target_x)), target_y), 6, (20, 20, 26), 1, cv2.LINE_AA)
 
 
 def _iter_raw_candidates(result: MeasurementResult) -> Iterable[RawEdgeCandidate]:
@@ -252,20 +266,11 @@ def _draw_distance(image: np.ndarray, result: DistanceResult, settings: Measurem
 
 
 def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, settings: MeasurementSettings) -> None:
-    if settings.show_selected_edges:
-        for candidate in taper.selected_boundary_candidates:
-            point = (int(round(candidate.image_x)), int(round(candidate.image_y)))
-            cv2.circle(image, point, 1, POINT_COLOR, -1, cv2.LINE_AA)
     if settings.show_fit_line and taper.fit_line:
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
         p2 = (int(round(x2)), int(round(y2)))
         cv2.line(image, p1, p2, color, 1, cv2.LINE_AA)
-        if settings.show_labels:
-            angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
-            mid = (int(round((x1 + x2) / 2)), int(round((y1 + y2) / 2)))
-            side = "좌측" if taper.side == "left" else "우측"
-            _label(image, f"{side} {angle:.1f} deg", (mid[0] + 8, mid[1]), color, scale=0.48)
 
 
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings) -> None:

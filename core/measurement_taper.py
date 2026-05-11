@@ -147,9 +147,8 @@ def _fit_selected_boundary(
         result.warning_message = f"{result.side} raw grayscale edge points not found"
         return result
 
-    target_y = _target_y_for_side(roi, result.side, settings)
     fit_source_candidates = _prefilter_taper_fit_candidates(all_selected)
-    fit_candidates = _fit_candidates_near_target(fit_source_candidates, target_y, roi)
+    fit_candidates = list(fit_source_candidates)
     fit_pts = np.asarray([(candidate.image_x, candidate.image_y) for candidate in fit_candidates], dtype=np.float64)
     result.fit_point_count = int(fit_pts.shape[0])
     result.valid_point_count = int(fit_pts.shape[0])
