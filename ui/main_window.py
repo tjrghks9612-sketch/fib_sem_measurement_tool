@@ -338,6 +338,9 @@ class MainWindow(ctk.CTk):
             settings.show_selected_edges,
             settings.show_fit_line,
             settings.show_roi,
+            round(float(settings.base_height_pct), 4),
+            round(float(settings.left_offset_pct), 4),
+            round(float(settings.right_offset_pct), 4),
             self.overlay_enabled,
             item.thumbnail.size if item.thumbnail is not None else None,
         )
@@ -377,10 +380,18 @@ class MainWindow(ctk.CTk):
                 return (settings.taper_side if settings.taper_side in ("left", "right") else "left",)
             return ()
 
+        result = item.result
+
         def taper_target_y(side: str) -> float:
             if settings.roi is None:
                 return 0.0
             _x1, y1, _x2, y2 = settings.roi
+            taper = None
+            if result is not None:
+                taper = result.right_taper if side == "right" else result.left_taper
+            if taper is not None and taper.fit_line:
+                _fit_x1, fit_y1, _fit_x2, fit_y2 = taper.fit_line
+                y1, y2 = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
             base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 50.0))))
             offset_pct = float(
                 getattr(settings, "right_offset_pct", 0.0)
@@ -388,7 +399,7 @@ class MainWindow(ctk.CTk):
                 else getattr(settings, "left_offset_pct", 0.0)
             )
             target_pct = max(0.0, min(100.0, base_pct + offset_pct))
-            return float(y1) + (float(y2 - y1) * target_pct / 100.0)
+            return float(y2) - (float(y2 - y1) * target_pct / 100.0)
 
         if settings.roi is not None:
             x1, y1, x2, y2 = settings.roi
@@ -402,7 +413,6 @@ class MainWindow(ctk.CTk):
                 drawn_rows.add(target_y)
                 draw.line([point(x1, target_y), point(x2, target_y)], fill=(210, 190, 255), width=1)
 
-        result = item.result
         if result is not None and settings.show_selected_edges:
             for measurement, color in (
                 (result.horizontal_cd, (255, 164, 55)),
