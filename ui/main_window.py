@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 import cv2
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from fib_sem_measurement_tool.core.calibration import apply_calibration, detect_scale_bar
 from fib_sem_measurement_tool.core.image_io import (
@@ -90,7 +90,7 @@ class MainWindow(ctk.CTk):
         self.thumbnail_panel = ThumbnailPanel(
             main,
             on_select_image=self.select_image,
-            on_selection_changed=self.refresh_thumbnail_panel,
+            on_selection_changed=lambda: None,
         )
         self.thumbnail_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
@@ -126,7 +126,6 @@ class MainWindow(ctk.CTk):
 
     def set_status(self, message: str) -> None:
         self.status_var.set(message)
-        self.update_idletasks()
 
     def _status_label(self, status: str) -> str:
         return {
@@ -340,6 +339,7 @@ class MainWindow(ctk.CTk):
             settings.show_fit_line,
             settings.show_roi,
             self.overlay_enabled,
+            item.thumbnail.size if item.thumbnail is not None else None,
         )
 
     def get_thumbnail_preview(self, item: ImageItem, settings: MeasurementSettings):
@@ -351,24 +351,52 @@ class MainWindow(ctk.CTk):
             self.thumbnail_overlay_cache.move_to_end(key)
             return cached
 
-        image = self.load_image_cached(item.image_path)
-        thumb_settings = settings.clone()
-        thumb_settings.show_labels = False
-        rendered = draw_overlay(
-            image,
-            thumb_settings.roi,
-            item.result,
-            thumb_settings,
-            show_overlay=True,
-            calibration_line=self.calibration_lines.get(item.image_path),
-            scale_bar_bbox=self.scale_bar_bboxes.get(item.image_path),
-        )
-        pil = Image.fromarray(cv2.cvtColor(rendered, cv2.COLOR_BGR2RGB))
+        pil = self._draw_fast_thumbnail_overlay(item, settings)
         self.thumbnail_overlay_cache[key] = pil
         self.thumbnail_overlay_cache.move_to_end(key)
         while len(self.thumbnail_overlay_cache) > self.thumbnail_overlay_cache_limit:
             self.thumbnail_overlay_cache.popitem(last=False)
         return pil
+
+    def _draw_fast_thumbnail_overlay(self, item: ImageItem, settings: MeasurementSettings) -> Image.Image:
+        source = item.thumbnail
+        if source is None:
+            return Image.new("RGB", (124, 80), "#101820")
+        thumb = source.convert("RGB").copy()
+        draw = ImageDraw.Draw(thumb)
+        scale_x = thumb.width / max(1, item.image_size[0])
+        scale_y = thumb.height / max(1, item.image_size[1])
+
+        def point(x: float, y: float) -> tuple[int, int]:
+            return int(round(x * scale_x)), int(round(y * scale_y))
+
+        if settings.roi is not None and settings.show_roi:
+            x1, y1, x2, y2 = settings.roi
+            draw.rectangle([point(x1, y1), point(x2, y2)], outline=(0, 210, 255), width=1)
+
+        result = item.result
+        if result is not None and settings.show_selected_edges:
+            for measurement, color in (
+                (result.horizontal_cd, (255, 164, 55)),
+                (result.vertical_thk, (80, 245, 120)),
+            ):
+                if measurement is None:
+                    continue
+                first_points = [point(pair.first.image_x, pair.first.image_y) for pair in measurement.selected_pairs]
+                second_points = [point(pair.second.image_x, pair.second.image_y) for pair in measurement.selected_pairs]
+                if len(first_points) >= 2:
+                    draw.line(first_points, fill=color, width=2)
+                if len(second_points) >= 2:
+                    draw.line(second_points, fill=color, width=2)
+
+            for taper, color in (
+                (result.left_taper, (255, 220, 75)),
+                (result.right_taper, (255, 145, 85)),
+            ):
+                if taper is not None and settings.show_fit_line and taper.fit_line:
+                    x1, y1, x2, y2 = taper.fit_line
+                    draw.line([point(x1, y1), point(x2, y2)], fill=color, width=2)
+        return thumb
 
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:
         self.profile_graph.update_cursor(x, y)
