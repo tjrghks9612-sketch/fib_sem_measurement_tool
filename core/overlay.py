@@ -266,11 +266,21 @@ def _draw_distance(image: np.ndarray, result: DistanceResult, settings: Measurem
 
 
 def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, settings: MeasurementSettings) -> None:
+    if settings.show_selected_edges:
+        for candidate in taper.selected_boundary_candidates[:: max(1, len(taper.selected_boundary_candidates) // 36)]:
+            point = (int(round(candidate.image_x)), int(round(candidate.image_y)))
+            cv2.circle(image, point, 1, POINT_COLOR, -1, cv2.LINE_AA)
     if settings.show_fit_line and taper.fit_line:
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
         p2 = (int(round(x2)), int(round(y2)))
         cv2.line(image, p1, p2, color, 1, cv2.LINE_AA)
+        if settings.show_labels:
+            angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
+            side = "좌측" if taper.side == "left" else "우측"
+            label_x = int(round(max(x1, x2) + 12 if taper.side == "left" else min(x1, x2) - 92))
+            label_y = int(round(min(y1, y2) + 28))
+            _label(image, f"{side} 테이퍼 {angle:.1f} deg", (label_x, label_y), color, scale=0.44)
 
 
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings) -> None:
