@@ -54,13 +54,61 @@ def _median_filter_along_scan_axis(data: np.ndarray, orientation: str, window: i
     return np.median(windows, axis=-1).astype(np.float32)
 
 
+def _edge_preserving_smooth_along_scan_axis(
+    data: np.ndarray,
+    orientation: str,
+    window: int,
+    range_sigma: float,
+) -> np.ndarray:
+    win = max(1, int(window))
+    if win <= 1:
+        return data.astype(np.float32, copy=True)
+    if win % 2 == 0:
+        win += 1
+
+    axis = 1 if orientation == "horizontal" else 0
+    if data.shape[axis] < 3:
+        return data.astype(np.float32, copy=True)
+
+    source = data.astype(np.float32, copy=False)
+    radius = min(win // 2, max(1, data.shape[axis] - 1))
+    sigma_space = max(1.0, float(radius) / 2.0)
+    sigma_range = max(1.0, float(range_sigma))
+    weighted_sum = source.copy()
+    weight_sum = np.ones_like(source, dtype=np.float32)
+
+    for offset in range(-radius, radius + 1):
+        if offset == 0:
+            continue
+        shifted = np.roll(source, shift=offset, axis=axis)
+        if axis == 1:
+            if offset < 0:
+                shifted[:, offset:] = source[:, offset:]
+            else:
+                shifted[:, :offset] = source[:, :offset]
+        else:
+            if offset < 0:
+                shifted[offset:, :] = source[offset:, :]
+            else:
+                shifted[:offset, :] = source[:offset, :]
+
+        spatial_weight = np.exp(-float(offset * offset) / (2.0 * sigma_space * sigma_space))
+        range_weight = np.exp(-((shifted - source) ** 2) / (2.0 * sigma_range * sigma_range))
+        weight = (spatial_weight * range_weight).astype(np.float32)
+        weighted_sum += shifted * weight
+        weight_sum += weight
+
+    return (weighted_sum / np.maximum(weight_sum, 1e-6)).astype(np.float32)
+
+
 def _prepare_detection_crop(crop: np.ndarray, orientation: str, settings: MeasurementSettings) -> np.ndarray:
     signal = _robust_normalize_signal(crop, settings)
     if bool(getattr(settings, "denoise_grayscale_profiles", False)):
-        signal = _median_filter_along_scan_axis(
+        signal = _edge_preserving_smooth_along_scan_axis(
             signal,
             orientation,
             int(getattr(settings, "profile_denoise_window", 3)),
+            float(getattr(settings, "profile_denoise_range_sigma", 28.0)),
         )
     return signal
 
@@ -80,6 +128,27 @@ def prepare_display_profile_signal(
     else:
         raise ValueError(f"Unsupported profile orientation: {orientation}")
     return _prepare_detection_crop(crop, orientation, settings).reshape(-1).astype(np.float32)
+
+
+def prepare_display_profile_from_roi(
+    gray: np.ndarray,
+    roi: Sequence[int],
+    orientation: str,
+    scan_index: int,
+    settings: MeasurementSettings,
+) -> tuple[np.ndarray, int, int]:
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    crop = np.asarray(gray[y1 : y2 + 1, x1 : x2 + 1], dtype=np.float32)
+    if crop.size == 0:
+        return np.asarray([], dtype=np.float32), 0, int(scan_index)
+    detection_crop = _prepare_detection_crop(crop, orientation, settings)
+    if orientation == "horizontal":
+        local_y = max(0, min(detection_crop.shape[0] - 1, int(scan_index) - y1))
+        return detection_crop[local_y, :].reshape(-1).astype(np.float32), x1, y1 + local_y
+    if orientation == "vertical":
+        local_x = max(0, min(detection_crop.shape[1] - 1, int(scan_index) - x1))
+        return detection_crop[:, local_x].reshape(-1).astype(np.float32), y1, x1 + local_x
+    raise ValueError(f"Unsupported profile orientation: {orientation}")
 
 
 def _minimum_delta(settings: MeasurementSettings) -> float:

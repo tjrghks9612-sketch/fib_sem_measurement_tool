@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 import customtkinter as ctk
 
@@ -35,6 +35,7 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.items: List[ImageItem] = []
         self.current_index = -1
         self.resolve_settings: Callable[[ImageItem], MeasurementSettings] = lambda item: MeasurementSettings()
+        self.render_thumbnail: Callable[[ImageItem, MeasurementSettings], Optional[object]] = lambda item, settings: item.thumbnail
         self.image_refs = []
         self.visible_indices: List[int] = []
 
@@ -88,10 +89,13 @@ class ThumbnailPanel(ctk.CTkFrame):
         items: List[ImageItem],
         current_index: int,
         resolve_settings: Callable[[ImageItem], MeasurementSettings],
+        render_thumbnail: Optional[Callable[[ImageItem, MeasurementSettings], Optional[object]]] = None,
     ) -> None:
         self.items = items
         self.current_index = current_index
         self.resolve_settings = resolve_settings
+        if render_thumbnail is not None:
+            self.render_thumbnail = render_thumbnail
         self._refresh_cards()
 
     def _passes_filter(self, item: ImageItem, settings: MeasurementSettings) -> bool:
@@ -147,8 +151,9 @@ class ThumbnailPanel(ctk.CTkFrame):
         check = ctk.CTkCheckBox(card, text="", width=22, variable=var, command=lambda i=index, v=var: self._toggle(i, v))
         check.grid(row=0, column=0, rowspan=5, padx=(8, 4), pady=8, sticky="ns")
 
-        if item.thumbnail is not None:
-            image = ctk.CTkImage(light_image=item.thumbnail, dark_image=item.thumbnail, size=(124, 80))
+        preview = self.render_thumbnail(item, settings)
+        if preview is not None:
+            image = ctk.CTkImage(light_image=preview, dark_image=preview, size=(124, 80))
             self.image_refs.append(image)
             thumb = ctk.CTkLabel(card, text="", image=image)
         else:
