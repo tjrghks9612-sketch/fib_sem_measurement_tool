@@ -11,6 +11,7 @@ MEASUREMENT_TYPES = {
     "distance_horizontal": "가로 CD",
     "distance_vertical": "세로 THK",
     "distance_both": "가로 + 세로",
+    "ellipse_cd": "CD 타원 측정",
 }
 
 MEASUREMENT_TYPE_BY_LABEL = {label: key for key, label in MEASUREMENT_TYPES.items()}

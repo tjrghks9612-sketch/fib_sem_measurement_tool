@@ -5,7 +5,6 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Dict, List, Optional
 
-import cv2
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 
@@ -58,10 +57,6 @@ class MainWindow(ctk.CTk):
         self.current_image_path = ""
         self.overlay_enabled = True
         self.scale_bar_bboxes: Dict[str, tuple] = {}
-        self.calibration_lines: Dict[str, tuple] = {}
-        self._auto_measure_after_id = None
-        self.auto_measure_delay_ms = 250
-        self._thumbnail_refresh_after_id = None
         self._profile_image_path = ""
         self._last_option_signature = None
         self.image_cache = OrderedDict()
@@ -87,6 +82,8 @@ class MainWindow(ctk.CTk):
         self.load_images_button.pack(side="left", padx=4)
         self.load_folder_button = ctk.CTkButton(toolbar, text=t(self.language, "load_folder"), width=140, command=self.load_folder_dialog)
         self.load_folder_button.pack(side="left", padx=4)
+        self.reset_images_button = ctk.CTkButton(toolbar, text=t(self.language, "reset_images"), width=120, fg_color="#203246", command=self.reset_images)
+        self.reset_images_button.pack(side="left", padx=4)
         self.previous_button = ctk.CTkButton(toolbar, text=t(self.language, "previous"), width=90, fg_color="#142234", command=self.previous_image)
         self.previous_button.pack(side="left", padx=(18, 4))
         self.next_button = ctk.CTkButton(toolbar, text=t(self.language, "next"), width=90, fg_color="#142234", command=self.next_image)
@@ -131,7 +128,6 @@ class MainWindow(ctk.CTk):
         self.viewer = ImageViewer(
             center,
             on_roi_changed=self.on_roi_changed,
-            on_calibration_line=self.on_calibration_line,
             on_overlay_toggled=self.on_overlay_toggled,
             on_hover_profile=self.on_profile_hover,
             language=self.language,
@@ -174,6 +170,7 @@ class MainWindow(ctk.CTk):
         self.toolbar_title_label.configure(text=t(self.language, "toolbar_title"))
         self.load_images_button.configure(text=t(self.language, "load_images"))
         self.load_folder_button.configure(text=t(self.language, "load_folder"))
+        self.reset_images_button.configure(text=t(self.language, "reset_images"))
         self.previous_button.configure(text=t(self.language, "previous"))
         self.next_button.configure(text=t(self.language, "next"))
         self.measure_current_button.configure(text=t(self.language, "measure_current"))
@@ -226,6 +223,31 @@ class MainWindow(ctk.CTk):
         if errors:
             messagebox.showwarning(t(self.language, "load_image_failed"), "\n".join(errors[:8]))
 
+    def reset_images(self) -> None:
+        self.image_items = []
+        self.current_index = -1
+        self.current_image = None
+        self.current_image_path = ""
+        self.scale_bar_bboxes.clear()
+        self.image_cache.clear()
+        self.render_cache.clear()
+        self.thumbnail_overlay_cache.clear()
+        self._profile_image_path = ""
+        self._last_option_signature = None
+        self.current_file_var.set(t(self.language, "current_file_none"))
+        self.viewer.clear()
+        self.profile_graph.set_image(None)
+        self.thumbnail_panel.refresh(
+            self.image_items,
+            self.current_index,
+            self.resolve_settings_for_item,
+            self.get_thumbnail_preview,
+        )
+        self.option_panel.set_settings(self.global_settings)
+        self.option_panel.set_candidate_summary(None, self.global_settings)
+        self.refresh_result_table()
+        self.set_status(t(self.language, "initial_status"))
+
     def resolve_settings_for_item(self, item: ImageItem) -> MeasurementSettings:
         return resolve_effective_settings(item, self.global_settings)
 
@@ -239,7 +261,6 @@ class MainWindow(ctk.CTk):
             return
         if index == self.current_index and self.current_image is not None:
             return
-        self._cancel_auto_measure()
         previous_index = self.current_index
         self.current_index = index
         self.load_current_image()
@@ -255,14 +276,6 @@ class MainWindow(ctk.CTk):
         if not self.image_items:
             return
         self.select_image(min(len(self.image_items) - 1, self.current_index + 1))
-
-    def _cancel_auto_measure(self) -> None:
-        if self._auto_measure_after_id is not None:
-            try:
-                self.after_cancel(self._auto_measure_after_id)
-            except ValueError:
-                pass
-            self._auto_measure_after_id = None
 
     def load_image_cached(self, path: str):
         cached = self.image_cache.get(path)
@@ -317,7 +330,6 @@ class MainWindow(ctk.CTk):
         self.option_panel.set_candidate_summary(item.result, settings)
 
     def _render_cache_key(self, item: ImageItem, settings: MeasurementSettings):
-        calibration_line = self.calibration_lines.get(item.image_path)
         scale_bar_bbox = self.scale_bar_bboxes.get(item.image_path)
         calibration = settings.calibration
         return (
@@ -350,13 +362,11 @@ class MainWindow(ctk.CTk):
             round(float(calibration.px_to_real), 8),
             calibration.unit,
             self.overlay_enabled,
-            settings.show_raw_candidates,
             settings.show_selected_edges,
             settings.show_fit_line,
             settings.show_roi,
             settings.show_labels,
             self.language,
-            calibration_line,
             scale_bar_bbox,
         )
 
@@ -372,7 +382,6 @@ class MainWindow(ctk.CTk):
             item.result,
             settings,
             show_overlay=self.overlay_enabled,
-            calibration_line=self.calibration_lines.get(item.image_path),
             scale_bar_bbox=self.scale_bar_bboxes.get(item.image_path),
             language=self.language,
         )
@@ -388,7 +397,6 @@ class MainWindow(ctk.CTk):
             id(item.result),
             settings.roi,
             settings.measurement_type,
-            settings.show_raw_candidates,
             settings.show_selected_edges,
             settings.show_fit_line,
             settings.show_roi,
@@ -501,6 +509,16 @@ class MainWindow(ctk.CTk):
                     x1, y1, x2, y2 = taper.fit_line
                     draw.line([point(x1, y1), point(x2, y2)], fill=(20, 20, 26), width=3)
                     draw.line([point(x1, y1), point(x2, y2)], fill=color, width=2)
+            ellipse = result.ellipse_cd
+            if ellipse is not None and ellipse.center_x is not None and ellipse.center_y is not None:
+                if ellipse.horizontal_diameter_px is not None and ellipse.vertical_diameter_px is not None:
+                    cx, cy = point(ellipse.center_x, ellipse.center_y)
+                    rx = int(round(ellipse.horizontal_diameter_px * scale_x * 0.5))
+                    ry = int(round(ellipse.vertical_diameter_px * scale_y * 0.5))
+                    draw.ellipse([(cx - rx, cy - ry), (cx + rx, cy + ry)], outline=(125, 205, 255), width=2)
+                for x, y in ellipse.boundary_points:
+                    px, py = point(x, y)
+                    draw.ellipse([(px - 2, py - 2), (px + 2, py + 2)], fill=(245, 250, 255))
         return thumb
 
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:
@@ -516,18 +534,6 @@ class MainWindow(ctk.CTk):
 
     def refresh_result_table(self) -> None:
         return
-
-    def schedule_thumbnail_panel_refresh(self) -> None:
-        if self._thumbnail_refresh_after_id is not None:
-            try:
-                self.after_cancel(self._thumbnail_refresh_after_id)
-            except ValueError:
-                pass
-        self._thumbnail_refresh_after_id = self.after(320, self._flush_thumbnail_panel_refresh)
-
-    def _flush_thumbnail_panel_refresh(self) -> None:
-        self._thumbnail_refresh_after_id = None
-        self.refresh_thumbnail_panel()
 
     def refresh_all(self) -> None:
         self.render_current_image()
@@ -570,7 +576,6 @@ class MainWindow(ctk.CTk):
             settings.taper_right_edge_direction,
             round(float(cal.px_to_real), 8),
             cal.unit,
-            settings.show_raw_candidates,
             settings.show_selected_edges,
             settings.show_fit_line,
             settings.show_roi,
@@ -594,40 +599,8 @@ class MainWindow(ctk.CTk):
         if settings.roi is not None and self.current_image is not None:
             item.result = None
             self.render_current_image(update_option_settings=False)
-            self._schedule_current_auto_measure()
         else:
             self.render_current_image(update_option_settings=False)
-            self.schedule_thumbnail_panel_refresh()
-
-    def _schedule_current_auto_measure(self) -> None:
-        if self._auto_measure_after_id is not None:
-            try:
-                self.after_cancel(self._auto_measure_after_id)
-            except ValueError:
-                pass
-        self._auto_measure_after_id = self.after(self.auto_measure_delay_ms, self._auto_measure_current)
-
-    def _auto_measure_current(self) -> None:
-        self._auto_measure_after_id = None
-        item = self.current_item()
-        if item is None or self.current_image is None:
-            return
-        settings = self.resolve_settings_for_item(item)
-        if settings.roi is None:
-            self.render_current_image(update_option_settings=False)
-            self.schedule_thumbnail_panel_refresh()
-            return
-        item.result = run_measurement(self.current_image, settings)
-        self.render_current_image(update_option_settings=False)
-        self.schedule_thumbnail_panel_refresh()
-        self.refresh_result_table()
-        self.set_status(
-            t(self.language, "option_changed").format(
-                file_name=item.file_name,
-                status=self._status_label(item.result.status),
-                confidence=item.result.overall_confidence,
-            )
-        )
 
     def on_roi_changed(self, roi) -> None:
         item = self.current_item()
@@ -642,17 +615,6 @@ class MainWindow(ctk.CTk):
         settings.roi_source_image = item.file_name
         item.result = None
         self.set_status(t(self.language, "roi_applied"))
-        self.render_current_image()
-        self.schedule_thumbnail_panel_refresh()
-        if self.current_image is not None:
-            self._schedule_current_auto_measure()
-
-    def on_calibration_line(self, line, length: float) -> None:
-        item = self.current_item()
-        if item is None:
-            return
-        self.calibration_lines[item.image_path] = line
-        self.set_status(t(self.language, "manual_calibration_line").format(length=length))
         self.render_current_image()
 
     def on_overlay_toggled(self, enabled: bool) -> None:
@@ -732,7 +694,6 @@ class MainWindow(ctk.CTk):
                 )
             )
         self.render_current_image()
-        self.schedule_thumbnail_panel_refresh()
 
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:

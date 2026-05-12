@@ -10,7 +10,14 @@ from fib_sem_measurement_tool.models.settings import MeasurementSettings
 from fib_sem_measurement_tool.ui.i18n import measurement_key, measurement_label, settings_source_label, status_label, t
 
 
-MEASUREMENT_KEYS = ("taper_single", "taper_double", "distance_horizontal", "distance_vertical", "distance_both")
+MEASUREMENT_KEYS = (
+    "taper_single",
+    "taper_double",
+    "distance_horizontal",
+    "distance_vertical",
+    "distance_both",
+    "ellipse_cd",
+)
 STATUS_KEYS = ("OK", "Check", "Review Needed", "Fail", "Not measured")
 
 

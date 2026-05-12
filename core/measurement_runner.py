@@ -6,6 +6,7 @@ import numpy as np
 
 from fib_sem_measurement_tool.core.image_io import to_gray
 from fib_sem_measurement_tool.core.measurement_cd_thk import CDMeasurementEngine
+from fib_sem_measurement_tool.core.measurement_ellipse_cd import measure_ellipse_cd
 from fib_sem_measurement_tool.core.measurement_taper import measure_double_taper, measure_single_taper
 from fib_sem_measurement_tool.core.roi_utils import normalize_roi
 from fib_sem_measurement_tool.models.result import MeasurementResult, MeasurementStatus
@@ -56,7 +57,7 @@ def _fail_result(measurement_type: str, message: str) -> MeasurementResult:
 def calculate_overall_coverage(result: MeasurementResult) -> float:
     components = [
         item
-        for item in (result.horizontal_cd, result.vertical_thk, result.left_taper, result.right_taper)
+        for item in (result.horizontal_cd, result.vertical_thk, result.left_taper, result.right_taper, result.ellipse_cd)
         if item is not None
     ]
     if not components:
@@ -99,6 +100,9 @@ def run_measurement(image: np.ndarray, settings: MeasurementSettings) -> Measure
             result.measurement_type = settings.measurement_type
         elif settings.measurement_type == "taper_single":
             result = measure_single_taper(gray, clean_roi, settings.taper_side, settings)
+            result.measurement_type = settings.measurement_type
+        elif settings.measurement_type == "ellipse_cd":
+            result = measure_ellipse_cd(gray, clean_roi, settings)
             result.measurement_type = settings.measurement_type
         else:
             raise UnsupportedMeasurementTypeError("Unsupported measurement type")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import tkinter as tk
 from typing import Callable, Optional, Tuple
 
@@ -16,7 +15,6 @@ class ImageViewer(ctk.CTkFrame):
         self,
         master,
         on_roi_changed: Callable[[Tuple[int, int, int, int]], None],
-        on_calibration_line: Callable[[Tuple[int, int, int, int], float], None],
         on_overlay_toggled: Callable[[bool], None],
         on_hover_profile: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
         language: str = "ko",
@@ -24,7 +22,6 @@ class ImageViewer(ctk.CTkFrame):
     ):
         super().__init__(master, fg_color="#0d1721", border_color="#223242", border_width=1, corner_radius=6, **kwargs)
         self.on_roi_changed = on_roi_changed
-        self.on_calibration_line = on_calibration_line
         self.on_overlay_toggled = on_overlay_toggled
         self.on_hover_profile = on_hover_profile
         self.language = language
@@ -76,10 +73,6 @@ class ImageViewer(ctk.CTkFrame):
         controls.pack(fill="x", padx=12, pady=(0, 10))
         self.roi_button = ctk.CTkButton(controls, text="ROI", width=54, command=lambda: self.set_mode("roi"))
         self.roi_button.pack(side="left", padx=(8, 4), pady=8)
-        self.calibration_button = ctk.CTkButton(
-            controls, text=t(self.language, "calibration_line"), width=108, fg_color="#203246", command=lambda: self.set_mode("calibration")
-        )
-        self.calibration_button.pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="-", width=38, fg_color="#142234", command=self.zoom_out).pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="+", width=38, fg_color="#142234", command=self.zoom_in).pack(side="left", padx=4, pady=8)
         self.fit_button = ctk.CTkButton(controls, text=t(self.language, "fit"), width=54, fg_color="#142234", command=self.fit)
@@ -90,9 +83,8 @@ class ImageViewer(ctk.CTkFrame):
         self.overlay_switch.pack(side="right", padx=10, pady=8)
 
     def set_mode(self, mode: str) -> None:
-        self.mode_var.set(mode)
-        self.canvas.configure(cursor="tcross" if mode == "calibration" else "crosshair")
-        self.status_var.set(t(self.language, "calibration_line_mode") if mode == "calibration" else self.status_var.get())
+        self.mode_var.set("roi")
+        self.canvas.configure(cursor="crosshair")
 
     def set_content(self, image_bgr, render_bgr, title: str, meta: str, status: str) -> None:
         image_id = (id(image_bgr), image_bgr.shape if image_bgr is not None else None)
@@ -219,10 +211,7 @@ class ImageViewer(ctk.CTkFrame):
         if self.drag_item:
             self.canvas.delete(self.drag_item)
         x0, y0 = self.drag_start_canvas
-        if self.mode_var.get() == "calibration":
-            self.drag_item = self.canvas.create_line(x0, y0, event.x, event.y, fill="#48d7ff", width=2)
-        else:
-            self.drag_item = self.canvas.create_rectangle(x0, y0, event.x, event.y, outline="#ffd23c", dash=(4, 3), width=2)
+        self.drag_item = self.canvas.create_rectangle(x0, y0, event.x, event.y, outline="#ffd23c", dash=(4, 3), width=2)
 
     def _on_release(self, event) -> None:
         if self.drag_start_canvas is None:
@@ -234,14 +223,6 @@ class ImageViewer(ctk.CTkFrame):
             self.canvas.delete(self.drag_item)
             self.drag_item = None
 
-        if self.mode_var.get() == "calibration":
-            x1, y1 = start
-            x2, y2 = end
-            length = math.hypot(x2 - x1, y2 - y1)
-            if length >= 3:
-                self.on_calibration_line((x1, y1, x2, y2), length)
-            return
-
         x1, y1 = start
         x2, y2 = end
         if abs(x2 - x1) >= 8 and abs(y2 - y1) >= 8:
@@ -251,7 +232,6 @@ class ImageViewer(ctk.CTkFrame):
         if language == self.language:
             return
         self.language = language
-        self.calibration_button.configure(text=t(self.language, "calibration_line"))
         self.fit_button.configure(text=t(self.language, "fit"))
         self.overlay_switch.configure(text=t(self.language, "overlay"))
         if self.image_bgr is None:

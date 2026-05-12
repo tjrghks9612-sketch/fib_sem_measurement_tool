@@ -21,7 +21,14 @@ from fib_sem_measurement_tool.ui.i18n import (
 )
 
 
-MEASUREMENT_KEYS = ("taper_single", "taper_double", "distance_horizontal", "distance_vertical", "distance_both")
+MEASUREMENT_KEYS = (
+    "taper_single",
+    "taper_double",
+    "distance_horizontal",
+    "distance_vertical",
+    "distance_both",
+    "ellipse_cd",
+)
 DISTANCE_METHOD_KEYS = ("mean", "max", "min")
 EDGE_SCAN_MODE_KEYS = ("auto", "outside_to_center", "center_to_outside")
 
@@ -60,7 +67,6 @@ class OptionPanel(ctk.CTkFrame):
         self.detected_px_var = tk.StringVar(value="")
         self.actual_length_var = tk.StringVar(value="")
         self.unit_var = tk.StringVar(value="um")
-        self.show_raw_var = tk.BooleanVar(value=False)
         self.show_selected_var = tk.BooleanVar(value=True)
         self.show_fit_var = tk.BooleanVar(value=True)
         self.show_roi_var = tk.BooleanVar(value=True)
@@ -139,7 +145,6 @@ class OptionPanel(ctk.CTkFrame):
         )
 
         self._section_label("section_overlay")
-        self._switch_row("raw_candidates", self.show_raw_var)
         self._switch_row("selected_edges", self.show_selected_var)
         self._switch_row("fit_line", self.show_fit_var)
         self._switch_row("ROI", self.show_roi_var)
@@ -296,7 +301,7 @@ class OptionPanel(ctk.CTkFrame):
         )
         settings.base_height_pct = self._float(self.taper_height_var.get().replace("%", ""), settings.base_height_pct)
         settings.calibration.unit = self.unit_var.get()
-        settings.show_raw_candidates = bool(self.show_raw_var.get())
+        settings.show_raw_candidates = False
         settings.show_selected_edges = bool(self.show_selected_var.get())
         settings.show_fit_line = bool(self.show_fit_var.get())
         settings.show_roi = bool(self.show_roi_var.get())
@@ -331,7 +336,6 @@ class OptionPanel(ctk.CTkFrame):
         taper_height = max(0, min(100, int(round(float(getattr(settings, "base_height_pct", 50.0))))))
         self.taper_height_var.set(f"{taper_height}%")
         self.taper_height_slider.set(taper_height)
-        self.show_raw_var.set(bool(settings.show_raw_candidates))
         self.show_selected_var.set(bool(settings.show_selected_edges))
         self.show_fit_var.set(bool(settings.show_fit_line))
         self.show_roi_var.set(bool(settings.show_roi))
@@ -385,6 +389,15 @@ class OptionPanel(ctk.CTkFrame):
             return f"{t(self.language, 'left_taper')} {result.left_taper.angle_horizontal:.2f} deg"
         if result.right_taper and result.right_taper.angle_horizontal is not None:
             return f"{t(self.language, 'right_taper')} {result.right_taper.angle_horizontal:.2f} deg"
+        if result.ellipse_cd and result.ellipse_cd.horizontal_diameter_px is not None:
+            h_value = result.ellipse_cd.horizontal_diameter_px * scale
+            if result.ellipse_cd.vertical_diameter_px is None:
+                return f"{t(self.language, 'ellipse_cd_horizontal')} {h_value:.4g} {unit}"
+            v_value = result.ellipse_cd.vertical_diameter_px * scale
+            return (
+                f"{t(self.language, 'ellipse_cd_horizontal')} {h_value:.4g} {unit}\n"
+                f"{t(self.language, 'ellipse_cd_vertical')} {v_value:.4g} {unit}"
+            )
         return t(self.language, "no_selected_result")
 
     def get_calibration_inputs(self):
