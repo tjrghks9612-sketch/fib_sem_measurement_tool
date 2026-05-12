@@ -6,13 +6,20 @@ from typing import Sequence
 import cv2
 import numpy as np
 
-from fib_sem_measurement_tool.core.grayscale_line_scan import prepare_display_profile_signal
+from fib_sem_measurement_tool.core.grayscale_line_scan import (
+    detect_profile_candidates,
+    prepare_display_profile_signal,
+)
 from fib_sem_measurement_tool.models.result import EllipseCDResult, MeasurementResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
 
 RAY_COUNT = 16
 MIN_POINT_COUNT = 5
+MIN_CENTER_RADIUS_RATIO = 0.08
+MAX_EDGE_RADIUS_MARGIN_PX = 1.5
+PERSISTENCE_WINDOW = 5
+TAIL_PERSISTENCE_WINDOW = 12
 
 
 def _ray_limit(cx: float, cy: float, dx: float, dy: float, roi: Sequence[int]) -> float:
@@ -34,30 +41,131 @@ def _sample_profile(gray: np.ndarray, cx: float, cy: float, dx: float, dy: float
     radii = np.arange(0.0, max_radius + 0.5, 1.0, dtype=np.float32)
     if radii.size < 3:
         return radii, np.asarray([], dtype=np.float32)
-    xs = np.clip(np.rint(cx + radii * dx).astype(np.int32), 0, gray.shape[1] - 1)
-    ys = np.clip(np.rint(cy + radii * dy).astype(np.int32), 0, gray.shape[0] - 1)
-    return radii, gray[ys, xs].astype(np.float32)
+    xs = np.clip(cx + radii * dx, 0.0, float(gray.shape[1] - 1)).astype(np.float32)
+    ys = np.clip(cy + radii * dy, 0.0, float(gray.shape[0] - 1)).astype(np.float32)
+    profile = cv2.remap(
+        gray.astype(np.float32, copy=False),
+        xs.reshape(1, -1),
+        ys.reshape(1, -1),
+        interpolation=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
+    return radii, profile.reshape(-1).astype(np.float32)
 
 
-def _first_edge_on_ray(profile: np.ndarray, radii: np.ndarray, max_radius: float, settings: MeasurementSettings) -> tuple[float, float] | None:
+def _candidate_settings(settings: MeasurementSettings, min_delta: float) -> MeasurementSettings:
+    candidate_settings = settings.clone()
+    candidate_settings.minimum_grayscale_delta = float(min_delta)
+    candidate_settings.denoise_grayscale_profiles = True
+    candidate_settings.profile_denoise_window = max(7, int(getattr(settings, "profile_denoise_window", 7)))
+    candidate_settings.profile_denoise_range_sigma = max(
+        18.0,
+        float(getattr(settings, "profile_denoise_range_sigma", 28.0)),
+    )
+    return candidate_settings
+
+
+def _profile_transition_hint(signal: np.ndarray, min_delta: float) -> float | None:
+    window = min(max(5, signal.size // 8), max(5, signal.size // 4))
+    if signal.size < window * 2:
+        return None
+    inner_mean = float(np.mean(signal[:window], dtype=np.float64))
+    outer_mean = float(np.mean(signal[-window:], dtype=np.float64))
+    contrast = outer_mean - inner_mean
+    if abs(contrast) < max(8.0, float(min_delta) * 0.5):
+        return None
+    return contrast
+
+
+def _persistent_transition(
+    signal: np.ndarray,
+    position: float,
+    signed_delta: float,
+    min_delta: float,
+    expected_contrast: float | None,
+) -> bool:
+    center = int(round(float(position)))
+    candidate_sign = np.sign(float(signed_delta))
+    if (
+        expected_contrast is not None
+        and candidate_sign != 0.0
+        and candidate_sign != np.sign(expected_contrast)
+    ):
+        return False
+    left_start = max(0, center - PERSISTENCE_WINDOW)
+    left_end = max(left_start, center)
+    right_start = min(signal.size, center + 1)
+    right_end = min(signal.size, right_start + PERSISTENCE_WINDOW)
+    if left_end <= left_start or right_end <= right_start:
+        return False
+    before = float(np.mean(signal[left_start:left_end], dtype=np.float64))
+    after = float(np.mean(signal[right_start:right_end], dtype=np.float64))
+    contrast = after - before
+    if abs(contrast) < max(5.0, float(min_delta) * 0.35):
+        return False
+    if contrast != 0.0 and np.sign(contrast) != np.sign(float(signed_delta)):
+        return False
+
+    tail_left_end = max(0, center - 2)
+    tail_left_start = max(0, tail_left_end - TAIL_PERSISTENCE_WINDOW)
+    tail_right_start = min(signal.size, center + 2)
+    tail_right_end = min(signal.size, tail_right_start + TAIL_PERSISTENCE_WINDOW)
+    if tail_left_end - tail_left_start >= 4 and tail_right_end - tail_right_start >= 4:
+        tail_before = float(np.mean(signal[tail_left_start:tail_left_end], dtype=np.float64))
+        tail_after = float(np.mean(signal[tail_right_start:tail_right_end], dtype=np.float64))
+        tail_contrast = tail_after - tail_before
+        tail_min_contrast = max(7.0, float(min_delta) * 0.45)
+        if expected_contrast is not None:
+            tail_min_contrast = max(tail_min_contrast, abs(expected_contrast) * 0.35)
+        if abs(tail_contrast) < tail_min_contrast:
+            return False
+        if tail_contrast != 0.0 and np.sign(tail_contrast) != np.sign(float(signed_delta)):
+            return False
+    return True
+
+
+def _first_edge_on_ray(
+    profile: np.ndarray,
+    radii: np.ndarray,
+    max_radius: float,
+    settings: MeasurementSettings,
+) -> tuple[float, float] | None:
     if profile.size < 3:
         return None
-    signal = prepare_display_profile_signal(profile, "horizontal", settings)
-    gradient = np.abs(np.diff(signal))
-    if gradient.size == 0:
-        return None
-
-    min_radius = max(3.0, max_radius * 0.08)
-    max_valid_radius = max_radius * 0.96
+    min_radius = max(3.0, max_radius * MIN_CENTER_RADIUS_RATIO)
+    max_valid_radius = max(0.0, max_radius - MAX_EDGE_RADIUS_MARGIN_PX)
     threshold = max(1.0, float(getattr(settings, "minimum_grayscale_delta", 30.0)))
-    for index, strength in enumerate(gradient):
-        radius = float((radii[index] + radii[index + 1]) * 0.5)
-        if radius < min_radius:
-            continue
-        if radius > max_valid_radius:
-            return None
-        if float(strength) >= threshold:
-            return radius, float(strength)
+    thresholds = [threshold, max(8.0, threshold * 0.55)]
+    positions = np.arange(profile.size, dtype=np.float32)
+
+    for candidate_threshold in thresholds:
+        candidate_settings = _candidate_settings(settings, candidate_threshold)
+        signal = prepare_display_profile_signal(profile, "horizontal", candidate_settings)
+        expected_contrast = _profile_transition_hint(signal, candidate_threshold)
+        candidates = detect_profile_candidates(
+            profile,
+            candidate_settings,
+            scan_axis="horizontal",
+            scan_index=0,
+            local_scan_index=0,
+            roi_origin=(0, 0),
+            detection_profile=signal,
+        )
+        for candidate in sorted(candidates, key=lambda item: float(item.position)):
+            radius = float(np.interp(float(candidate.position), positions, radii))
+            if radius < min_radius:
+                continue
+            if radius > max_valid_radius:
+                continue
+            if not _persistent_transition(
+                signal,
+                candidate.position,
+                candidate.signed_delta,
+                candidate_threshold,
+                expected_contrast,
+            ):
+                continue
+            return radius, float(candidate.strength)
     return None
 
 
