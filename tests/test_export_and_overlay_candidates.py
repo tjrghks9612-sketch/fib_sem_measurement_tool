@@ -41,7 +41,42 @@ class ExportAndOverlayCandidateTest(unittest.TestCase):
         self.assertGreater(row["raw_edge_count"], 0)
         self.assertGreater(row["horizontal_cd_raw_edge_count"], 0)
 
-    def test_raw_candidate_overlay_toggle_changes_rendered_pixels(self) -> None:
+    def test_csv_includes_ellipse_cd_fields(self) -> None:
+        settings = MeasurementSettings(
+            roi=(20, 20, 140, 120),
+            measurement_type="ellipse_cd",
+            minimum_grayscale_delta=25.0,
+        )
+        image = np.full((150, 170), 20, dtype=np.uint8)
+        yy, xx = np.indices(image.shape[:2])
+        image[((xx - 80) / 42.0) ** 2 + ((yy - 70) / 28.0) ** 2 <= 1.0] = 190
+        result = run_measurement(image, settings)
+        item = ImageItem(image_path="ellipse.png", file_name="ellipse.png", image_size=(170, 150), result=result)
+
+        row = make_result_row(item, settings)
+
+        for column in [
+            "ellipse_cd_ray_attempt_count",
+            "ellipse_cd_valid_point_count",
+            "ellipse_cd_outlier_count",
+            "ellipse_cd_center_x",
+            "ellipse_cd_center_y",
+            "ellipse_cd_major_axis_px",
+            "ellipse_cd_minor_axis_px",
+            "ellipse_cd_angle_deg",
+            "ellipse_cd_horizontal_diameter_px",
+            "ellipse_cd_vertical_diameter_px",
+            "ellipse_cd_horizontal_diameter",
+            "ellipse_cd_vertical_diameter",
+            "ellipse_cd_confidence",
+            "ellipse_cd_status",
+            "ellipse_cd_warning_message",
+        ]:
+            self.assertIn(column, CSV_COLUMNS)
+            self.assertIn(column, row)
+        self.assertGreater(row["ellipse_cd_valid_point_count"], 0)
+
+    def test_raw_candidate_overlay_toggle_does_not_render_debug_points(self) -> None:
         image, item, settings = self._measured_item()
         self.assertIsNotNone(item.result)
 
@@ -50,7 +85,7 @@ class ExportAndOverlayCandidateTest(unittest.TestCase):
         settings.show_raw_candidates = False
         without_raw = draw_overlay(image, settings.roi, item.result, settings, show_overlay=True)
 
-        self.assertGreater(int(np.sum(np.abs(with_raw.astype(np.int16) - without_raw.astype(np.int16)))), 0)
+        self.assertEqual(int(np.sum(np.abs(with_raw.astype(np.int16) - without_raw.astype(np.int16)))), 0)
 
 
 if __name__ == "__main__":

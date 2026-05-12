@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -9,8 +9,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from fib_sem_measurement_tool.models.result import (
     DistanceResult,
+    EllipseCDResult,
     MeasurementResult,
-    RawEdgeCandidate,
     TaperSideResult,
 )
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
@@ -23,13 +23,12 @@ BG_PANEL: Color = (10, 18, 28)
 TEXT: Color = (232, 240, 248)
 MUTED: Color = (150, 165, 180)
 ROI_COLOR: Color = (0, 210, 255)
-RAW_HORIZONTAL_COLOR: Color = (80, 220, 255)
-RAW_VERTICAL_COLOR: Color = (70, 245, 140)
 CD_COLOR: Color = (255, 164, 55)
 THK_COLOR: Color = (80, 245, 120)
 TAPER_LEFT_COLOR: Color = (255, 220, 75)
 TAPER_RIGHT_COLOR: Color = (255, 145, 85)
 TAPER_HEIGHT_COLOR: Color = (210, 190, 255)
+ELLIPSE_COLOR: Color = (125, 205, 255)
 POINT_COLOR: Color = (245, 250, 255)
 FAIL_COLOR: Color = (80, 105, 255)
 
@@ -201,42 +200,6 @@ def _draw_taper_height_guides(
         cv2.circle(image, (int(round(target_x)), target_y), 9, TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
 
 
-def _iter_raw_candidates(result: MeasurementResult) -> Iterable[RawEdgeCandidate]:
-    seen: set[tuple[str, int, float, float, float]] = set()
-    for measurement in (result.horizontal_cd, result.vertical_thk, result.left_taper, result.right_taper):
-        if measurement is None:
-            continue
-        for candidate in measurement.raw_edge_candidates:
-            key = (
-                candidate.scan_axis,
-                candidate.scan_index,
-                round(candidate.position, 4),
-                round(candidate.image_x, 4),
-                round(candidate.image_y, 4),
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            yield candidate
-
-
-def _draw_raw_candidates(image: np.ndarray, candidates: Iterable[RawEdgeCandidate]) -> None:
-    overlay = image.copy()
-    count = 0
-    for candidate in candidates:
-        x = int(round(candidate.image_x))
-        y = int(round(candidate.image_y))
-        if not (0 <= x < image.shape[1] and 0 <= y < image.shape[0]):
-            continue
-        if candidate.scan_axis == "horizontal":
-            cv2.line(overlay, (x, max(0, y - 2)), (x, min(image.shape[0] - 1, y + 2)), RAW_HORIZONTAL_COLOR, 1, cv2.LINE_AA)
-        else:
-            cv2.line(overlay, (max(0, x - 2), y), (min(image.shape[1] - 1, x + 2), y), RAW_VERTICAL_COLOR, 1, cv2.LINE_AA)
-        count += 1
-    if count:
-        cv2.addWeighted(overlay, 0.36, image, 0.64, 0, image)
-
-
 def _draw_distance(image: np.ndarray, result: DistanceResult, settings: MeasurementSettings, color: Color, label_prefix: str) -> None:
     if not result.selected_pairs:
         return
@@ -287,16 +250,46 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
             _label(image, f"{side} {t(language, 'taper')} {angle:.1f} deg", (label_x, label_y), color, scale=0.44)
 
 
+def _draw_ellipse_cd(image: np.ndarray, result: EllipseCDResult, settings: MeasurementSettings, language: str) -> None:
+    if result.center_x is None or result.center_y is None or result.major_axis_px is None or result.minor_axis_px is None:
+        return
+    center = (int(round(result.center_x)), int(round(result.center_y)))
+    axes = (max(1, int(round(result.major_axis_px * 0.5))), max(1, int(round(result.minor_axis_px * 0.5))))
+    angle = float(result.angle_deg or 0.0)
+    for x, y in result.boundary_points:
+        point = (int(round(x)), int(round(y)))
+        cv2.circle(image, point, 3, POINT_COLOR, -1, cv2.LINE_AA)
+        cv2.circle(image, point, 4, ELLIPSE_COLOR, 1, cv2.LINE_AA)
+    cv2.ellipse(image, center, axes, angle, 0.0, 360.0, (20, 20, 26), 5, cv2.LINE_AA)
+    cv2.ellipse(image, center, axes, angle, 0.0, 360.0, ELLIPSE_COLOR, 2, cv2.LINE_AA)
+    if result.horizontal_diameter_px is not None:
+        half = int(round(result.horizontal_diameter_px * 0.5))
+        p1 = (center[0] - half, center[1])
+        p2 = (center[0] + half, center[1])
+        cv2.arrowedLine(image, p1, p2, CD_COLOR, 2, cv2.LINE_AA, tipLength=0.025)
+        cv2.arrowedLine(image, p2, p1, CD_COLOR, 2, cv2.LINE_AA, tipLength=0.025)
+        if settings.show_labels:
+            _label(image, f"{t(language, 'ellipse_cd_horizontal')} {_format_value(result.horizontal_diameter_px, settings)}", (p2[0] + 8, p2[1] - 8), CD_COLOR, scale=0.44)
+    if result.vertical_diameter_px is not None:
+        half = int(round(result.vertical_diameter_px * 0.5))
+        p1 = (center[0], center[1] - half)
+        p2 = (center[0], center[1] + half)
+        cv2.arrowedLine(image, p1, p2, THK_COLOR, 2, cv2.LINE_AA, tipLength=0.025)
+        cv2.arrowedLine(image, p2, p1, THK_COLOR, 2, cv2.LINE_AA, tipLength=0.025)
+        if settings.show_labels:
+            _label(image, f"{t(language, 'ellipse_cd_vertical')} {_format_value(result.vertical_diameter_px, settings)}", (p2[0] + 8, p2[1] - 8), THK_COLOR, scale=0.44)
+
+
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings, language: str) -> None:
     if not settings.show_labels:
         return
     rows = [("ROI", ROI_COLOR)]
-    if settings.show_raw_candidates:
-        rows.append((t(language, "raw_candidates"), RAW_HORIZONTAL_COLOR))
     if settings.show_selected_edges:
         rows.append((t(language, "selected_edges"), POINT_COLOR))
     if settings.show_fit_line and result and (result.left_taper or result.right_taper):
         rows.append((t(language, "fit_line"), TAPER_LEFT_COLOR))
+    if result and result.ellipse_cd:
+        rows.append((measurement_label(language, "ellipse_cd"), ELLIPSE_COLOR))
     if settings.roi is not None and _taper_sides(settings):
         rows.append((t(language, "taper_height"), TAPER_HEIGHT_COLOR))
 
@@ -329,6 +322,10 @@ def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: Measur
         lines.append(f"THK {_format_value(result.vertical_thk.selected_px, settings)}")
     if result.avg_taper_angle is not None:
         lines.append(f"{t(language, 'average_taper')} {result.avg_taper_angle:.1f} deg")
+    if result.ellipse_cd and result.ellipse_cd.horizontal_diameter_px is not None:
+        lines.append(f"{t(language, 'ellipse_cd_horizontal')} {_format_value(result.ellipse_cd.horizontal_diameter_px, settings)}")
+    if result.ellipse_cd and result.ellipse_cd.vertical_diameter_px is not None:
+        lines.append(f"{t(language, 'ellipse_cd_vertical')} {_format_value(result.ellipse_cd.vertical_diameter_px, settings)}")
 
     x = 16
     y = 20
@@ -349,7 +346,6 @@ def draw_overlay(
     result: Optional[MeasurementResult],
     settings: MeasurementSettings,
     show_overlay: bool = True,
-    calibration_line: Optional[Tuple[int, int, int, int]] = None,
     scale_bar_bbox: Optional[Tuple[int, int, int, int]] = None,
     language: str = "ko",
 ) -> np.ndarray:
@@ -366,20 +362,14 @@ def draw_overlay(
         cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
         if settings.show_labels:
             _label(canvas, t(language, "scale_bar"), (x1, y1 - 8), (255, 255, 90), scale=0.48)
-    if calibration_line:
-        x1, y1, x2, y2 = [int(v) for v in calibration_line]
-        cv2.line(canvas, (x1, y1), (x2, y2), (70, 220, 255), 2, cv2.LINE_AA)
-        if settings.show_labels:
-            _label(canvas, t(language, "calibration_line"), (x1, y1 - 8), (70, 220, 255), scale=0.48)
-
     if result is not None:
-        if settings.show_raw_candidates:
-            _draw_raw_candidates(canvas, _iter_raw_candidates(result))
         if settings.show_selected_edges:
             if result.horizontal_cd:
                 _draw_distance(canvas, result.horizontal_cd, settings, CD_COLOR, "CD")
             if result.vertical_thk:
                 _draw_distance(canvas, result.vertical_thk, settings, THK_COLOR, "THK")
+            if result.ellipse_cd:
+                _draw_ellipse_cd(canvas, result.ellipse_cd, settings, language)
         if result.left_taper:
             _draw_taper(canvas, result.left_taper, TAPER_LEFT_COLOR, settings, language)
         if result.right_taper:

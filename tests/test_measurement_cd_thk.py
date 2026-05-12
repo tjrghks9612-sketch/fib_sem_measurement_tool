@@ -284,6 +284,39 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(filtered.selected_px, 60.0, delta=2.0)
         self.assertIn("angle filter removed", filtered.warning_message)
 
+    def test_ellipse_cd_fits_valid_boundary_points(self) -> None:
+        settings = MeasurementSettings(
+            roi=(20, 20, 140, 120),
+            measurement_type="ellipse_cd",
+            minimum_grayscale_delta=25.0,
+        )
+        image = np.full((150, 170), 20, dtype=np.uint8)
+        yy, xx = np.indices(image.shape)
+        mask = ((xx - 80) / 42.0) ** 2 + ((yy - 70) / 28.0) ** 2 <= 1.0
+        image[mask] = 190
+
+        result = run_measurement(image, settings)
+
+        self.assertIsNotNone(result.ellipse_cd)
+        self.assertNotEqual(result.ellipse_cd.status, "Fail")
+        self.assertGreaterEqual(result.ellipse_cd.valid_point_count, 5)
+        self.assertAlmostEqual(result.ellipse_cd.horizontal_diameter_px, 84.0, delta=8.0)
+        self.assertAlmostEqual(result.ellipse_cd.vertical_diameter_px, 56.0, delta=8.0)
+
+    def test_ellipse_cd_fails_with_too_few_points(self) -> None:
+        settings = MeasurementSettings(
+            roi=(20, 20, 140, 120),
+            measurement_type="ellipse_cd",
+            minimum_grayscale_delta=25.0,
+        )
+        image = np.full((150, 170), 20, dtype=np.uint8)
+
+        result = run_measurement(image, settings)
+
+        self.assertIsNotNone(result.ellipse_cd)
+        self.assertEqual(result.ellipse_cd.status, "Fail")
+        self.assertLess(result.ellipse_cd.valid_point_count, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

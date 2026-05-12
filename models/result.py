@@ -144,12 +144,45 @@ class TaperSideResult:
 
 
 @dataclass
+class EllipseCDResult:
+    ray_attempt_count: int = 16
+    valid_point_count: int = 0
+    outlier_count: int = 0
+    center_x: Optional[float] = None
+    center_y: Optional[float] = None
+    major_axis_px: Optional[float] = None
+    minor_axis_px: Optional[float] = None
+    angle_deg: Optional[float] = None
+    horizontal_diameter_px: Optional[float] = None
+    vertical_diameter_px: Optional[float] = None
+    confidence: float = 0.0
+    status: str = "Fail"
+    warning_message: str = ""
+    boundary_points: List[Tuple[float, float]] = field(default_factory=list)
+    edge_strength_mean: Optional[float] = None
+    radius_cv: Optional[float] = None
+
+    def scaled(self, px_to_real: float) -> Dict[str, Optional[float]]:
+        if not px_to_real:
+            px_to_real = 1.0
+        return {
+            "horizontal_diameter": self.horizontal_diameter_px * px_to_real
+            if self.horizontal_diameter_px is not None
+            else None,
+            "vertical_diameter": self.vertical_diameter_px * px_to_real
+            if self.vertical_diameter_px is not None
+            else None,
+        }
+
+
+@dataclass
 class MeasurementResult:
     measurement_type: str
     horizontal_cd: Optional[DistanceResult] = None
     vertical_thk: Optional[DistanceResult] = None
     left_taper: Optional[TaperSideResult] = None
     right_taper: Optional[TaperSideResult] = None
+    ellipse_cd: Optional[EllipseCDResult] = None
     avg_taper_angle: Optional[float] = None
     taper_angle_diff: Optional[float] = None
     overall_confidence: float = 0.0
@@ -169,6 +202,16 @@ class MeasurementResult:
             chunks.append(f"좌 {self.left_taper.angle_horizontal:.1f} deg")
         if self.right_taper and self.right_taper.angle_horizontal is not None:
             chunks.append(f"우 {self.right_taper.angle_horizontal:.1f} deg")
+        if self.ellipse_cd and self.ellipse_cd.horizontal_diameter_px is not None:
+            h_value = self.ellipse_cd.horizontal_diameter_px * px_to_real
+            v_value = (
+                self.ellipse_cd.vertical_diameter_px * px_to_real
+                if self.ellipse_cd.vertical_diameter_px is not None
+                else None
+            )
+            chunks.append(f"Ellipse H {h_value:.3g} {unit}")
+            if v_value is not None:
+                chunks.append(f"Ellipse V {v_value:.3g} {unit}")
         status_label = {
             "OK": "정상",
             "Check": "확인",
@@ -186,8 +229,11 @@ class MeasurementResult:
         )
 
     def selected_point_count(self) -> int:
-        return sum(
+        count = sum(
             item.selected_point_count
             for item in (self.horizontal_cd, self.vertical_thk, self.left_taper, self.right_taper)
             if item is not None
         )
+        if self.ellipse_cd is not None:
+            count += self.ellipse_cd.valid_point_count
+        return count

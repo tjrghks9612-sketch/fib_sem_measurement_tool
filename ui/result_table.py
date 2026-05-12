@@ -98,6 +98,8 @@ class ResultTable(ctk.CTkFrame):
             value = f"{result.left_taper.angle_horizontal:.3g} deg"
         elif result.right_taper and result.right_taper.angle_horizontal is not None:
             value = f"{result.right_taper.angle_horizontal:.3g} deg"
+        elif result.ellipse_cd and result.ellipse_cd.horizontal_diameter_px is not None:
+            value = f"H {result.ellipse_cd.horizontal_diameter_px * settings.calibration.px_to_real:.4g}"
 
         return [
             item.file_name,
