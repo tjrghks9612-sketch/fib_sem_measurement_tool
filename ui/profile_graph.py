@@ -14,6 +14,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
 from fib_sem_measurement_tool.core.profile_markers import collect_profile_edge_markers
 from fib_sem_measurement_tool.models.result import MeasurementResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
+from fib_sem_measurement_tool.ui.i18n import profile_mode_key, profile_mode_label, t
 
 
 MARKER_COLORS = {
@@ -24,10 +25,11 @@ MARKER_COLORS = {
 
 
 class ProfileGraph(ctk.CTkFrame):
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, language: str = "ko", **kwargs):
         super().__init__(master, fg_color="#0d1721", border_color="#223242", border_width=1, corner_radius=6, **kwargs)
-        self.mode_var = tk.StringVar(value="둘 다")
-        self.coord_var = tk.StringVar(value="이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
+        self.language = language
+        self.mode_var = tk.StringVar(value=profile_mode_label(self.language, "both"))
+        self.coord_var = tk.StringVar(value=t(self.language, "profile_hover_prompt"))
         self.gray: Optional[np.ndarray] = None
         self.result: Optional[MeasurementResult] = None
         self.settings = MeasurementSettings()
@@ -69,11 +71,12 @@ class ProfileGraph(ctk.CTkFrame):
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(8, 4))
-        ctk.CTkLabel(header, text="그레이스케일 그래프", font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
+        self.title_label = ctk.CTkLabel(header, text=t(self.language, "profile_title"), font=ctk.CTkFont(size=13, weight="bold"))
+        self.title_label.pack(side="left")
         ctk.CTkLabel(header, textvariable=self.coord_var, text_color="#90a2b4").pack(side="left", padx=12)
         self.mode = ctk.CTkSegmentedButton(
             header,
-            values=["둘 다", "가로", "세로"],
+            values=[profile_mode_label(self.language, key) for key in ("both", "horizontal", "vertical")],
             variable=self.mode_var,
             command=lambda _value: self._draw_graph(),
             width=220,
@@ -92,7 +95,7 @@ class ProfileGraph(ctk.CTkFrame):
             self._image_id = None
             self._result_id = None
             self._last_drawn_cursor = None
-            self.coord_var.set("이미지 없음")
+            self.coord_var.set(t(self.language, "profile_no_image"))
             self._request_draw()
             return
         image_id = (id(image_bgr), image_bgr.shape)
@@ -105,7 +108,7 @@ class ProfileGraph(ctk.CTkFrame):
         self._image_id = image_id
         self.cursor = None
         self._last_drawn_cursor = None
-        self.coord_var.set("이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
+        self.coord_var.set(t(self.language, "profile_hover_prompt"))
         self._request_draw()
 
     def set_result(self, result: Optional[MeasurementResult]) -> None:
@@ -139,7 +142,7 @@ class ProfileGraph(ctk.CTkFrame):
             return
         self.cursor = None
         self._last_drawn_cursor = None
-        self.coord_var.set("이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다")
+        self.coord_var.set(t(self.language, "profile_hover_prompt"))
         self._draw_graph()
 
     def update_cursor(self, x: Optional[int], y: Optional[int]) -> None:
@@ -168,14 +171,14 @@ class ProfileGraph(ctk.CTkFrame):
         self._last_drawn_cursor = self.cursor
         mode_text = []
         if bool(getattr(self.settings, "normalize_grayscale_profiles", False)):
-            mode_text.append("정규화")
+            mode_text.append(t(self.language, "profile_normalized"))
         if bool(getattr(self.settings, "denoise_grayscale_profiles", False)):
-            mode_text.append("스무딩")
-        basis = "ROI" if self.settings.roi is not None else "전체"
-        suffix = f" / 그래프: {basis} 기준"
+            mode_text.append(t(self.language, "profile_smoothed"))
+        basis = t(self.language, "profile_roi") if self.settings.roi is not None else t(self.language, "profile_full")
+        suffix = f" / {t(self.language, 'profile_graph_basis')}: {basis}"
         if mode_text:
             suffix += f" {'+'.join(mode_text)}"
-        self.coord_var.set(f"x={x}, y={y}, 원본={int(self.gray[y, x])}{suffix}")
+        self.coord_var.set(f"x={x}, y={y}, {t(self.language, 'profile_original')}={int(self.gray[y, x])}{suffix}")
         self._draw_graph()
 
     def _profile_points(self, profile: np.ndarray, width: int, height: int):
@@ -225,13 +228,15 @@ class ProfileGraph(ctk.CTkFrame):
         self.canvas.create_text(text_x, text_y, text=self._marker_label(label), fill=color, anchor=anchor, font=("Arial", 8, "bold"))
 
     def _marker_label(self, label: str) -> str:
+        side_left = t(self.language, "left_taper").replace(t(self.language, "taper"), "").strip()
+        side_right = t(self.language, "right_taper").replace(t(self.language, "taper"), "").strip()
         return {
-            "CD L": "CD 좌",
-            "CD R": "CD 우",
-            "THK T": "THK 상",
-            "THK B": "THK 하",
-            "L taper": "좌 테이퍼",
-            "R taper": "우 테이퍼",
+            "CD L": f"CD {side_left}",
+            "CD R": f"CD {side_right}",
+            "THK T": "THK T",
+            "THK B": "THK B",
+            "L taper": t(self.language, "left_taper"),
+            "R taper": t(self.language, "right_taper"),
         }.get(label, label)
 
     def _draw_edge_markers(
@@ -266,23 +271,38 @@ class ProfileGraph(ctk.CTkFrame):
             self.canvas.create_text(4, y - 2, text=str(value), fill="#647487", anchor="sw", font=("Arial", 8))
 
         if self.gray is None:
-            self.canvas.create_text(width / 2, height / 2, text="이미지를 불러오세요", fill="#8293a6")
+            self.canvas.create_text(width / 2, height / 2, text=t(self.language, "profile_load_image"), fill="#8293a6")
             return
         if self.cursor is None:
-            self.canvas.create_text(width / 2, height / 2, text="메인 이미지에 마우스를 올리세요", fill="#8293a6")
+            self.canvas.create_text(width / 2, height / 2, text=t(self.language, "profile_hover_main"), fill="#8293a6")
             return
 
         x, y = self.cursor
-        mode = self.mode_var.get()
-        if mode in ("둘 다", "가로"):
+        mode = profile_mode_key(self.mode_var.get())
+        if mode in ("both", "horizontal"):
             horizontal, offset, scan_index = self._profile_for_axis("horizontal", y)
             step = max(1, int(len(horizontal) / max(width, 1)))
             self._draw_polyline(self._profile_points(horizontal, width, height), "#38a8ff", step)
             self._draw_edge_markers("horizontal", scan_index, horizontal, width, height, offset)
-            self.canvas.create_text(width - 8, 14, text="가로", fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
-        if mode in ("둘 다", "세로"):
+            self.canvas.create_text(width - 8, 14, text=profile_mode_label(self.language, "horizontal"), fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
+        if mode in ("both", "vertical"):
             vertical, offset, scan_index = self._profile_for_axis("vertical", x)
             step = max(1, int(len(vertical) / max(width, 1)))
             self._draw_polyline(self._profile_points(vertical, width, height), "#61f27a", step)
             self._draw_edge_markers("vertical", scan_index, vertical, width, height, offset)
-            self.canvas.create_text(width - 8, 30, text="세로", fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))
+            self.canvas.create_text(width - 8, 30, text=profile_mode_label(self.language, "vertical"), fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))
+
+    def set_language(self, language: str) -> None:
+        if language == self.language:
+            return
+        mode_key = profile_mode_key(self.mode_var.get())
+        self.language = language
+        self.title_label.configure(text=t(self.language, "profile_title"))
+        values = [profile_mode_label(self.language, key) for key in ("both", "horizontal", "vertical")]
+        self.mode.configure(values=values)
+        self.mode_var.set(profile_mode_label(self.language, mode_key))
+        if self.gray is None:
+            self.coord_var.set(t(self.language, "profile_no_image"))
+        elif self.cursor is None:
+            self.coord_var.set(t(self.language, "profile_hover_prompt"))
+        self._draw_graph()

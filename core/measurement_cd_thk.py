@@ -56,6 +56,64 @@ def _nearest_selected_pair(selected_pairs: Sequence[PairCandidate], selected_px:
     return min(selected_pairs, key=lambda pair: abs(pair.distance - selected_px))
 
 
+def _boundary_coordinate(orientation: str, pair: PairCandidate, boundary: str) -> float:
+    candidate = pair.first if boundary == "first" else pair.second
+    return float(candidate.image_x if orientation == "horizontal" else candidate.image_y)
+
+
+def _local_boundary_angles_deg(
+    selected_pairs: Sequence[PairCandidate],
+    orientation: str,
+    boundary: str,
+    window: int,
+) -> dict[int, float]:
+    if len(selected_pairs) < 3:
+        return {int(pair.scan_index): 0.0 for pair in selected_pairs}
+
+    pairs = sorted(selected_pairs, key=lambda pair: int(pair.scan_index))
+    scans = np.asarray([float(pair.scan_index) for pair in pairs], dtype=np.float64)
+    coords = np.asarray([_boundary_coordinate(orientation, pair, boundary) for pair in pairs], dtype=np.float64)
+    half = max(1, int(window) // 2)
+    angles: dict[int, float] = {}
+
+    for index, pair in enumerate(pairs):
+        start = max(0, index - half)
+        end = min(len(pairs), index + half + 1)
+        if end - start < 3:
+            start = max(0, min(start, len(pairs) - 3))
+            end = min(len(pairs), max(end, start + 3))
+        local_scans = scans[start:end]
+        local_coords = coords[start:end]
+        if len(np.unique(local_scans)) < 2:
+            angle = 0.0
+        else:
+            slope, _intercept = np.polyfit(local_scans, local_coords, 1)
+            angle = abs(float(np.degrees(np.arctan(float(slope)))))
+        angles[int(pair.scan_index)] = angle
+    return angles
+
+
+def _filter_pairs_by_boundary_angle(
+    selected_pairs: Sequence[PairCandidate],
+    orientation: str,
+    max_angle_deg: float,
+    window: int = 9,
+) -> tuple[list[PairCandidate], int]:
+    if max_angle_deg <= 0.0 or max_angle_deg >= 89.9 or len(selected_pairs) < 3:
+        return list(selected_pairs), 0
+
+    first_angles = _local_boundary_angles_deg(selected_pairs, orientation, "first", window)
+    second_angles = _local_boundary_angles_deg(selected_pairs, orientation, "second", window)
+    filtered = [
+        pair
+        for pair in selected_pairs
+        if first_angles.get(int(pair.scan_index), 0.0) <= max_angle_deg
+        and second_angles.get(int(pair.scan_index), 0.0) <= max_angle_deg
+    ]
+    removed_count = len(selected_pairs) - len(filtered)
+    return filtered, removed_count
+
+
 def _edge_scan_directions(orientation: str, settings: MeasurementSettings) -> tuple[str, str]:
     edge_scan_mode = getattr(settings, "edge_scan_mode", "auto")
     if edge_scan_mode in {"outside_to_center", "center_to_outside"}:
@@ -136,6 +194,15 @@ def _measure_distance(
             max_jump_px=max_jump_px,
         )
 
+    angle_filtered_count = 0
+    if bool(getattr(settings, "filter_cd_thk_by_boundary_angle", False)):
+        selected_pairs, angle_filtered_count = _filter_pairs_by_boundary_angle(
+            selected_pairs,
+            orientation,
+            max_angle_deg=float(getattr(settings, "max_cd_thk_boundary_angle_deg", 18.0)),
+            window=int(getattr(settings, "cd_thk_boundary_angle_window", 9)),
+        )
+
     result = DistanceResult(
         orientation=orientation,
         selected_method=settings.distance_method,
@@ -155,7 +222,10 @@ def _measure_distance(
     )
 
     if not selected_pairs:
-        result.warning_message = f"{orientation} raw grayscale pair candidates not found"
+        if angle_filtered_count:
+            result.warning_message = f"{orientation} boundary angle filter removed all selected scanlines"
+        else:
+            result.warning_message = f"{orientation} raw grayscale pair candidates not found"
         result.status = "Fail"
         return result
 
@@ -173,6 +243,8 @@ def _measure_distance(
     result.selected_pair = _nearest_selected_pair(selected_pairs, result.selected_px)
     result.confidence = float(selected_pair_coverage * 100.0)
     result.status = _status_from_candidates(result.valid_count, selected_pair_coverage)
+    if angle_filtered_count:
+        result.warning_message = f"{orientation} boundary angle filter removed {angle_filtered_count} scanlines"
     return result
 
 

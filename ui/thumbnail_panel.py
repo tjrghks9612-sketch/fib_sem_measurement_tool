@@ -6,19 +6,12 @@ from typing import Callable, List, Optional
 import customtkinter as ctk
 
 from fib_sem_measurement_tool.models.image_item import ImageItem
-from fib_sem_measurement_tool.models.settings import MEASUREMENT_TYPES, MeasurementSettings
+from fib_sem_measurement_tool.models.settings import MeasurementSettings
+from fib_sem_measurement_tool.ui.i18n import measurement_key, measurement_label, settings_source_label, status_label, t
 
 
-ALL_TYPES = "전체 유형"
-ALL_STATUSES = "전체 상태"
-STATUS_LABELS = {
-    "OK": "정상",
-    "Check": "확인",
-    "Review Needed": "검토 필요",
-    "Fail": "실패",
-    "Not measured": "측정 전",
-}
-STATUS_BY_LABEL = {label: status for status, label in STATUS_LABELS.items()}
+MEASUREMENT_KEYS = ("taper_single", "taper_double", "distance_horizontal", "distance_vertical", "distance_both")
+STATUS_KEYS = ("OK", "Check", "Review Needed", "Fail", "Not measured")
 
 
 class ThumbnailPanel(ctk.CTkFrame):
@@ -27,11 +20,13 @@ class ThumbnailPanel(ctk.CTkFrame):
         master,
         on_select_image: Callable[[int], None],
         on_selection_changed: Callable[[], None],
+        language: str = "ko",
         **kwargs,
     ):
         super().__init__(master, fg_color="#0d1721", border_color="#223242", border_width=1, corner_radius=6, **kwargs)
         self.on_select_image = on_select_image
         self.on_selection_changed = on_selection_changed
+        self.language = language
         self.items: List[ImageItem] = []
         self.current_index = -1
         self.resolve_settings: Callable[[ImageItem], MeasurementSettings] = lambda item: MeasurementSettings()
@@ -40,16 +35,17 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.visible_indices: List[int] = []
         self.card_refs = {}
 
-        self.type_filter = tk.StringVar(value=ALL_TYPES)
-        self.status_filter = tk.StringVar(value=ALL_STATUSES)
-        self.count_var = tk.StringVar(value="0개 이미지")
+        self.type_filter = tk.StringVar(value=t(self.language, "all_types"))
+        self.status_filter = tk.StringVar(value=t(self.language, "all_statuses"))
+        self.count_var = tk.StringVar(value=f"0 {t(self.language, 'images_unit')}")
         self.selection_var = tk.StringVar(value="0 / 0")
         self._build()
 
     def _build(self) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=10, pady=(10, 4))
-        ctk.CTkLabel(header, text="이미지 / 결과", font=ctk.CTkFont(size=15, weight="bold")).pack(side="left")
+        self.header_label = ctk.CTkLabel(header, text=t(self.language, "thumb_header"), font=ctk.CTkFont(size=15, weight="bold"))
+        self.header_label.pack(side="left")
         ctk.CTkLabel(header, textvariable=self.count_var, text_color="#90a2b4").pack(side="right")
 
         filters = ctk.CTkFrame(self, fg_color="transparent")
@@ -57,7 +53,7 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.type_menu = ctk.CTkOptionMenu(
             filters,
             variable=self.type_filter,
-            values=[ALL_TYPES] + list(MEASUREMENT_TYPES.values()),
+            values=self._type_filter_values(),
             width=150,
             command=lambda _v: self._refresh_cards(),
         )
@@ -65,7 +61,7 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.status_menu = ctk.CTkOptionMenu(
             filters,
             variable=self.status_filter,
-            values=[ALL_STATUSES] + list(STATUS_LABELS.values()),
+            values=self._status_filter_values(),
             width=150,
             command=lambda _v: self._refresh_cards(),
         )
@@ -76,14 +72,19 @@ class ThumbnailPanel(ctk.CTkFrame):
 
         footer = ctk.CTkFrame(self, fg_color="#0a121b")
         footer.pack(fill="x", padx=10, pady=(0, 10))
-        ctk.CTkButton(footer, text="전체 선택", width=90, fg_color="#142234", command=self.select_all_visible).pack(
-            side="left", padx=6, pady=6
-        )
-        ctk.CTkButton(footer, text="해제", width=90, fg_color="#142234", command=self.clear_selection).pack(
-            side="left", padx=4, pady=6
-        )
-        ctk.CTkLabel(footer, text="선택").pack(side="left", padx=(14, 2))
+        self.select_all_button = ctk.CTkButton(footer, text=t(self.language, "select_all"), width=90, fg_color="#142234", command=self.select_all_visible)
+        self.select_all_button.pack(side="left", padx=6, pady=6)
+        self.clear_button = ctk.CTkButton(footer, text=t(self.language, "clear"), width=90, fg_color="#142234", command=self.clear_selection)
+        self.clear_button.pack(side="left", padx=4, pady=6)
+        self.selection_label = ctk.CTkLabel(footer, text=t(self.language, "selection"))
+        self.selection_label.pack(side="left", padx=(14, 2))
         ctk.CTkLabel(footer, textvariable=self.selection_var, text_color="#48aaff").pack(side="left")
+
+    def _type_filter_values(self) -> list[str]:
+        return [t(self.language, "all_types")] + [measurement_label(self.language, key) for key in MEASUREMENT_KEYS]
+
+    def _status_filter_values(self) -> list[str]:
+        return [t(self.language, "all_statuses")] + [status_label(self.language, key) for key in STATUS_KEYS]
 
     def refresh(
         self,
@@ -101,12 +102,12 @@ class ThumbnailPanel(ctk.CTkFrame):
 
     def _passes_filter(self, item: ImageItem, settings: MeasurementSettings) -> bool:
         type_filter = self.type_filter.get()
-        if type_filter != ALL_TYPES and MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type) != type_filter:
+        if type_filter != t(self.language, "all_types") and settings.measurement_type != measurement_key(type_filter, ""):
             return False
         status_filter = self.status_filter.get()
         status = item.result.status if item.result else "Not measured"
-        selected_status = STATUS_BY_LABEL.get(status_filter, status_filter)
-        if status_filter != ALL_STATUSES and status != selected_status:
+        selected_status = next((key for key in STATUS_KEYS if status_label(self.language, key) == status_filter), status_filter)
+        if status_filter != t(self.language, "all_statuses") and status != selected_status:
             return False
         return True
 
@@ -124,7 +125,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             self.visible_indices.append(index)
             self._create_card(index, item, settings)
 
-        self.count_var.set(f"{len(self.visible_indices)} / {len(self.items)}개 이미지")
+        self.count_var.set(f"{len(self.visible_indices)} / {len(self.items)} {t(self.language, 'images_unit')}")
         selected_count = sum(1 for item in self.items if item.selected)
         self.selection_var.set(f"{selected_count} / {len(self.items)}")
 
@@ -160,7 +161,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             self.image_refs.append(image)
             thumb = ctk.CTkLabel(card, text="", image=image)
         else:
-            thumb = ctk.CTkLabel(card, text="미리보기 없음", width=124, height=80)
+            thumb = ctk.CTkLabel(card, text=t(self.language, "no_preview"), width=124, height=80)
         thumb.grid(row=0, column=1, rowspan=5, padx=6, pady=8)
 
         number = ctk.CTkLabel(card, text=f"{index + 1:02d}", fg_color="#164c94", corner_radius=4, width=28)
@@ -168,25 +169,22 @@ class ThumbnailPanel(ctk.CTkFrame):
         name = ctk.CTkLabel(card, text=item.file_name, anchor="w", font=ctk.CTkFont(size=12, weight="bold"))
         name.grid(row=0, column=2, sticky="ew", padx=(36, 8), pady=(8, 0))
 
-        type_text = MEASUREMENT_TYPES.get(settings.measurement_type, settings.measurement_type)
-        roi_text = "ROI 있음" if settings.roi else "ROI 없음"
-        source_text = {
-            "global_default": "기본 설정",
-            "image_specific": "이미지별 설정",
-        }.get(settings.settings_source, settings.settings_source)
+        type_text = measurement_label(self.language, settings.measurement_type)
+        roi_text = t(self.language, "roi_exists") if settings.roi else t(self.language, "roi_missing")
+        source_text = settings_source_label(self.language, settings.settings_source)
         ctk.CTkLabel(card, text=f"{type_text} | {roi_text} | {source_text}", anchor="w", text_color="#c7d2df").grid(
             row=2, column=2, sticky="ew", padx=2
         )
         calibration_text = {
-            "not_calibrated": "미보정",
-            "calibrated": "보정됨",
+            "not_calibrated": t(self.language, "not_calibrated"),
+            "calibrated": t(self.language, "calibrated"),
         }.get(settings.calibration.status, settings.calibration.status)
-        ctk.CTkLabel(card, text=f"캘리브레이션: {calibration_text}", anchor="w", text_color="#8ea0b1").grid(
+        ctk.CTkLabel(card, text=f"{t(self.language, 'calibration')}: {calibration_text}", anchor="w", text_color="#8ea0b1").grid(
             row=3, column=2, sticky="ew", padx=2
         )
 
         status = item.result.status if item.result else "Not measured"
-        summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else "측정 전"
+        summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else t(self.language, "before_measurement")
         ctk.CTkLabel(card, text=summary, anchor="w", text_color=self._status_color(status)).grid(
             row=4, column=2, sticky="ew", padx=2, pady=(0, 8)
         )
@@ -229,4 +227,20 @@ class ThumbnailPanel(ctk.CTkFrame):
         for item in self.items:
             item.selected = False
         self.on_selection_changed()
+        self._refresh_cards()
+
+    def set_language(self, language: str) -> None:
+        if language == self.language:
+            return
+        type_key = measurement_key(self.type_filter.get(), "")
+        status_key = next((key for key in STATUS_KEYS if status_label(self.language, key) == self.status_filter.get()), "")
+        self.language = language
+        self.header_label.configure(text=t(self.language, "thumb_header"))
+        self.select_all_button.configure(text=t(self.language, "select_all"))
+        self.clear_button.configure(text=t(self.language, "clear"))
+        self.selection_label.configure(text=t(self.language, "selection"))
+        self.type_menu.configure(values=self._type_filter_values())
+        self.status_menu.configure(values=self._status_filter_values())
+        self.type_filter.set(measurement_label(self.language, type_key) if type_key else t(self.language, "all_types"))
+        self.status_filter.set(status_label(self.language, status_key) if status_key else t(self.language, "all_statuses"))
         self._refresh_cards()

@@ -256,6 +256,34 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(markers[0].position, 40.0, delta=2.0)
         self.assertAlmostEqual(markers[1].position, 119.0, delta=2.0)
 
+    def test_boundary_angle_filter_removes_curved_cd_sections(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 119, 79),
+            measurement_type="distance_horizontal",
+            minimum_grayscale_delta=30.0,
+            filter_cd_thk_by_boundary_angle=True,
+            max_cd_thk_boundary_angle_deg=12.0,
+        )
+        image = np.full((80, 120), 20, dtype=np.uint8)
+        for y in range(80):
+            if 25 <= y <= 54:
+                left, right = 30, 90
+            else:
+                offset = int(round(abs(y - 40) * 0.8))
+                left, right = 30 + offset, 90 - offset
+            if right > left:
+                image[y, left:right] = 200
+
+        filtered = measure_horizontal_cd(image, settings.roi, settings)
+        unfiltered_settings = settings.clone()
+        unfiltered_settings.filter_cd_thk_by_boundary_angle = False
+        unfiltered = measure_horizontal_cd(image, settings.roi, unfiltered_settings)
+
+        self.assertIsNotNone(filtered.selected_px)
+        self.assertLess(filtered.valid_count, unfiltered.valid_count)
+        self.assertAlmostEqual(filtered.selected_px, 60.0, delta=2.0)
+        self.assertIn("angle filter removed", filtered.warning_message)
+
 
 if __name__ == "__main__":
     unittest.main()
