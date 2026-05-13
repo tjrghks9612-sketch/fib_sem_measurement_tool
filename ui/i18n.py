@@ -18,7 +18,6 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "가로 CD",
         "distance_vertical": "세로 THK",
         "distance_both": "가로 + 세로",
-        "ellipse_cd": "CD 타원 측정",
     },
     "en": {
         "taper_single": "Single taper",
@@ -26,7 +25,6 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "Horizontal CD",
         "distance_vertical": "Vertical THK",
         "distance_both": "Horizontal + Vertical",
-        "ellipse_cd": "Ellipse CD",
     },
     "vi": {
         "taper_single": "Taper một bên",
@@ -34,7 +32,6 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "CD ngang",
         "distance_vertical": "THK dọc",
         "distance_both": "Ngang + Dọc",
-        "ellipse_cd": "CD ellipse",
     },
 }
 

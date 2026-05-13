@@ -4,7 +4,7 @@ import csv
 from typing import Dict, Iterable, List, Optional
 
 from fib_sem_measurement_tool.models.image_item import ImageItem
-from fib_sem_measurement_tool.models.result import DistanceResult, EllipseCDResult, MeasurementResult, TaperSideResult
+from fib_sem_measurement_tool.models.result import DistanceResult, MeasurementResult, TaperSideResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings, resolve_effective_settings
 
 
@@ -73,21 +73,6 @@ CSV_COLUMNS = [
     "vertical_thk_valid_count",
     "vertical_thk_confidence",
     "vertical_thk_status",
-    "ellipse_cd_ray_attempt_count",
-    "ellipse_cd_valid_point_count",
-    "ellipse_cd_outlier_count",
-    "ellipse_cd_center_x",
-    "ellipse_cd_center_y",
-    "ellipse_cd_major_axis_px",
-    "ellipse_cd_minor_axis_px",
-    "ellipse_cd_angle_deg",
-    "ellipse_cd_horizontal_diameter_px",
-    "ellipse_cd_vertical_diameter_px",
-    "ellipse_cd_horizontal_diameter",
-    "ellipse_cd_vertical_diameter",
-    "ellipse_cd_confidence",
-    "ellipse_cd_status",
-    "ellipse_cd_warning_message",
     "overall_confidence",
     "status",
     "warning_message",
@@ -171,27 +156,6 @@ def _taper_values(side: str, row: Dict[str, object], result: Optional[TaperSideR
     row[f"{side}_taper_fit_point_count"] = result.fit_point_count
 
 
-def _ellipse_values(row: Dict[str, object], result: Optional[EllipseCDResult], settings: MeasurementSettings) -> None:
-    if result is None:
-        return
-    row["ellipse_cd_ray_attempt_count"] = result.ray_attempt_count
-    row["ellipse_cd_valid_point_count"] = result.valid_point_count
-    row["ellipse_cd_outlier_count"] = result.outlier_count
-    row["ellipse_cd_center_x"] = result.center_x
-    row["ellipse_cd_center_y"] = result.center_y
-    row["ellipse_cd_major_axis_px"] = result.major_axis_px
-    row["ellipse_cd_minor_axis_px"] = result.minor_axis_px
-    row["ellipse_cd_angle_deg"] = result.angle_deg
-    row["ellipse_cd_horizontal_diameter_px"] = result.horizontal_diameter_px
-    row["ellipse_cd_vertical_diameter_px"] = result.vertical_diameter_px
-    scaled = result.scaled(settings.calibration.px_to_real)
-    row["ellipse_cd_horizontal_diameter"] = scaled["horizontal_diameter"]
-    row["ellipse_cd_vertical_diameter"] = scaled["vertical_diameter"]
-    row["ellipse_cd_confidence"] = result.confidence
-    row["ellipse_cd_status"] = result.status
-    row["ellipse_cd_warning_message"] = result.warning_message
-
-
 def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str, object]:
     result: Optional[MeasurementResult] = item.result
     roi = settings.roi or ("", "", "", "")
@@ -228,7 +192,6 @@ def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str,
     _taper_values("right", row, result.right_taper)
     _distance_values("horizontal_cd", row, result.horizontal_cd, settings)
     _distance_values("vertical_thk", row, result.vertical_thk, settings)
-    _ellipse_values(row, result.ellipse_cd, settings)
     row["overall_confidence"] = result.overall_confidence
     row["status"] = result.status
     row["warning_message"] = result.warning_message

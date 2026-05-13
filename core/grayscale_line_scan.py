@@ -152,7 +152,7 @@ def prepare_display_profile_from_roi(
 
 
 def _minimum_delta(settings: MeasurementSettings) -> float:
-    return max(0.0, float(getattr(settings, "minimum_grayscale_delta", 30.0)))
+    return max(0.0, float(getattr(settings, "minimum_grayscale_delta", 55.0)))
 
 
 def _max_profile_candidates(settings: MeasurementSettings) -> int:

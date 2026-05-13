@@ -11,7 +11,6 @@ MEASUREMENT_TYPES = {
     "distance_horizontal": "가로 CD",
     "distance_vertical": "세로 THK",
     "distance_both": "가로 + 세로",
-    "ellipse_cd": "CD 타원 측정",
 }
 
 MEASUREMENT_TYPE_BY_LABEL = {label: key for key, label in MEASUREMENT_TYPES.items()}
@@ -73,12 +72,12 @@ class MeasurementSettings:
     normalize_high_percentile: float = 98.0
     normalize_min_span: float = 12.0
     max_profile_candidates_per_scanline: int = 16
-    minimum_grayscale_delta: float = 30.0
+    minimum_grayscale_delta: float = 55.0
     max_jump_px: float = 28.0
     filter_cd_thk_by_boundary_angle: bool = False
     max_cd_thk_boundary_angle_deg: float = 18.0
     cd_thk_boundary_angle_window: int = 9
-    base_height_pct: float = 50.0
+    base_height_pct: float = 30.0
     left_offset_pct: float = 0.0
     right_offset_pct: float = 0.0
     taper_residual_limit_px: float = 18.0

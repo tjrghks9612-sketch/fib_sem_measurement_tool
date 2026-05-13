@@ -18,6 +18,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
 from fib_sem_measurement_tool.models.result import RawEdgeCandidate
 from fib_sem_measurement_tool.core.measurement_cd_thk import measure_horizontal_cd, measure_vertical_thk
 from fib_sem_measurement_tool.core.measurement_runner import run_measurement
+from fib_sem_measurement_tool.core.measurement_taper import LimitPeakBoundaryEngine
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
 
@@ -285,6 +286,42 @@ class RawEdgeScannerTest(unittest.TestCase):
             [5.5, 5.5, 6.166666666666667, 6.833333333333333, 7.5],
             rtol=1e-6,
         )
+
+    def test_limit_peak_taper_tie_breaks_by_scan_mode(self) -> None:
+        settings = MeasurementSettings(minimum_grayscale_delta=20.0)
+        engine = LimitPeakBoundaryEngine(settings)
+        candidates = [
+            RawEdgeCandidate("horizontal", 0, 0, position, position, 0.0, 100.0, 100.0, 1, 0.0, 100.0)
+            for position in (2.0, 8.0)
+        ]
+
+        engine.scan_mode = "outside_to_center"
+        self.assertEqual(engine._primary_candidate(candidates, "left").position, 2.0)
+        self.assertEqual(engine._primary_candidate(candidates, "right").position, 8.0)
+
+        engine.scan_mode = "center_to_outside"
+        self.assertEqual(engine._primary_candidate(candidates, "left").position, 8.0)
+        self.assertEqual(engine._primary_candidate(candidates, "right").position, 2.0)
+
+    def test_double_taper_returns_successful_side_when_other_side_has_no_boundary(self) -> None:
+        settings = MeasurementSettings(
+            roi=(0, 0, 79, 59),
+            measurement_type="taper_double",
+            minimum_grayscale_delta=20.0,
+            edge_scan_mode="center_to_outside",
+        )
+        image = np.full((60, 80), 40, dtype=np.uint8)
+        for y in range(image.shape[0]):
+            left_edge = 16 + y // 10
+            image[y, :left_edge] = 180
+
+        result = run_measurement(image, settings)
+
+        self.assertIsNotNone(result.left_taper)
+        self.assertIsNotNone(result.right_taper)
+        self.assertNotEqual(result.left_taper.status, "Fail")
+        self.assertEqual(result.right_taper.status, "Fail")
+        self.assertNotEqual(result.status, "Fail")
 
 
 if __name__ == "__main__":

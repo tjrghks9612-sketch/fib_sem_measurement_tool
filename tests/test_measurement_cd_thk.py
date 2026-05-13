@@ -284,80 +284,7 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(filtered.selected_px, 60.0, delta=2.0)
         self.assertIn("angle filter removed", filtered.warning_message)
 
-    def test_ellipse_cd_fits_valid_boundary_points(self) -> None:
-        settings = MeasurementSettings(
-            roi=(20, 20, 140, 120),
-            measurement_type="ellipse_cd",
-            minimum_grayscale_delta=25.0,
-        )
-        image = np.full((150, 170), 20, dtype=np.uint8)
-        yy, xx = np.indices(image.shape)
-        mask = ((xx - 80) / 42.0) ** 2 + ((yy - 70) / 28.0) ** 2 <= 1.0
-        image[mask] = 190
-
-        result = run_measurement(image, settings)
-
-        self.assertIsNotNone(result.ellipse_cd)
-        self.assertNotEqual(result.ellipse_cd.status, "Fail")
-        self.assertGreaterEqual(result.ellipse_cd.valid_point_count, 5)
-        self.assertAlmostEqual(result.ellipse_cd.horizontal_diameter_px, 84.0, delta=8.0)
-        self.assertAlmostEqual(result.ellipse_cd.vertical_diameter_px, 56.0, delta=8.0)
-
-    def test_ellipse_cd_rejects_center_speckles_before_boundary(self) -> None:
-        settings = MeasurementSettings(
-            roi=(20, 20, 140, 120),
-            measurement_type="ellipse_cd",
-            minimum_grayscale_delta=22.0,
-            denoise_grayscale_profiles=False,
-        )
-        rng = np.random.default_rng(321)
-        image = np.full((150, 170), 176, dtype=np.float32)
-        yy, xx = np.indices(image.shape)
-        mask = ((xx - 80) / 42.0) ** 2 + ((yy - 70) / 28.0) ** 2 <= 1.0
-        image[mask] = 34
-        image += rng.normal(0.0, 8.0, image.shape)
-        for angle in np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False):
-            x = int(round(80 + 15 * np.cos(angle)))
-            y = int(round(70 + 15 * np.sin(angle)))
-            image[max(0, y - 1):y + 2, max(0, x - 1):x + 2] = 176
-        for angle in np.linspace(
-            np.pi / 8.0,
-            2.0 * np.pi + np.pi / 8.0,
-            8,
-            endpoint=False,
-        ):
-            x = int(round(80 + 52 * np.cos(angle)))
-            y = int(round(70 + 36 * np.sin(angle)))
-            image[max(0, y - 1):y + 2, max(0, x - 1):x + 2] = 34
-
-        result = run_measurement(np.clip(image, 0, 255).astype(np.uint8), settings)
-
-        self.assertIsNotNone(result.ellipse_cd)
-        self.assertNotEqual(result.ellipse_cd.status, "Fail")
-        self.assertGreaterEqual(result.ellipse_cd.valid_point_count, 12)
-        self.assertAlmostEqual(result.ellipse_cd.horizontal_diameter_px, 84.0, delta=3.0)
-        self.assertAlmostEqual(result.ellipse_cd.vertical_diameter_px, 56.0, delta=3.0)
-
-    def test_ellipse_cd_handles_tight_roi_near_boundary(self) -> None:
-        settings = MeasurementSettings(
-            roi=(38, 42, 122, 98),
-            measurement_type="ellipse_cd",
-            minimum_grayscale_delta=25.0,
-        )
-        image = np.full((150, 170), 20, dtype=np.uint8)
-        yy, xx = np.indices(image.shape)
-        mask = ((xx - 80) / 42.0) ** 2 + ((yy - 70) / 28.0) ** 2 <= 1.0
-        image[mask] = 190
-
-        result = run_measurement(image, settings)
-
-        self.assertIsNotNone(result.ellipse_cd)
-        self.assertNotEqual(result.ellipse_cd.status, "Fail")
-        self.assertGreaterEqual(result.ellipse_cd.valid_point_count, 5)
-        self.assertAlmostEqual(result.ellipse_cd.horizontal_diameter_px, 84.0, delta=6.0)
-        self.assertAlmostEqual(result.ellipse_cd.vertical_diameter_px, 56.0, delta=6.0)
-
-    def test_ellipse_cd_fails_with_too_few_points(self) -> None:
+    def test_ellipse_cd_measurement_type_is_no_longer_supported(self) -> None:
         settings = MeasurementSettings(
             roi=(20, 20, 140, 120),
             measurement_type="ellipse_cd",
@@ -367,9 +294,9 @@ class CdThkMeasurementTest(unittest.TestCase):
 
         result = run_measurement(image, settings)
 
-        self.assertIsNotNone(result.ellipse_cd)
-        self.assertEqual(result.ellipse_cd.status, "Fail")
-        self.assertLess(result.ellipse_cd.valid_point_count, 5)
+        self.assertEqual(result.status, "Fail")
+        self.assertIsNone(result.ellipse_cd)
+        self.assertIn("Unsupported measurement type", result.warning_message)
 
 
 if __name__ == "__main__":

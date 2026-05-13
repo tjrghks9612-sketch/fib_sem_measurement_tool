@@ -227,6 +227,16 @@ class ProfileGraph(ctk.CTkFrame):
         text_y = min(height - 20, max(10, y + (row % 3 - 1) * 16))
         self.canvas.create_text(text_x, text_y, text=self._marker_label(label), fill=color, anchor=anchor, font=("Arial", 8, "bold"))
 
+    def _draw_cursor_marker(self, profile: np.ndarray, position: float, width: int, height: int, color: str) -> None:
+        if profile.size == 0:
+            return
+        x = self._profile_x(position, int(profile.size), width)
+        index = int(round(max(0.0, min(float(profile.size - 1), float(position)))))
+        y = self._profile_y(float(profile[index]), height)
+        self.canvas.create_line(x, 8, x, height - 8, fill=color, dash=(2, 3), width=1)
+        self.canvas.create_line(max(0, x - 7), y, min(width - 1, x + 7), y, fill=color, width=2)
+        self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline=color, fill="#071018", width=2)
+
     def _marker_label(self, label: str) -> str:
         side_left = t(self.language, "left_taper").replace(t(self.language, "taper"), "").strip()
         side_right = t(self.language, "right_taper").replace(t(self.language, "taper"), "").strip()
@@ -283,12 +293,14 @@ class ProfileGraph(ctk.CTkFrame):
             horizontal, offset, scan_index = self._profile_for_axis("horizontal", y)
             step = max(1, int(len(horizontal) / max(width, 1)))
             self._draw_polyline(self._profile_points(horizontal, width, height), "#38a8ff", step)
+            self._draw_cursor_marker(horizontal, x - offset, width, height, "#f4f8fb")
             self._draw_edge_markers("horizontal", scan_index, horizontal, width, height, offset)
             self.canvas.create_text(width - 8, 14, text=profile_mode_label(self.language, "horizontal"), fill="#38a8ff", anchor="ne", font=("Arial", 10, "bold"))
         if mode in ("both", "vertical"):
             vertical, offset, scan_index = self._profile_for_axis("vertical", x)
             step = max(1, int(len(vertical) / max(width, 1)))
             self._draw_polyline(self._profile_points(vertical, width, height), "#61f27a", step)
+            self._draw_cursor_marker(vertical, y - offset, width, height, "#f4f8fb")
             self._draw_edge_markers("vertical", scan_index, vertical, width, height, offset)
             self.canvas.create_text(width - 8, 30, text=profile_mode_label(self.language, "vertical"), fill="#61f27a", anchor="ne", font=("Arial", 10, "bold"))
 

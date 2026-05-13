@@ -65,6 +65,8 @@ class MainWindow(ctk.CTk):
         self.render_cache_limit = 4
         self.thumbnail_overlay_cache = OrderedDict()
         self.thumbnail_overlay_cache_limit = 32
+        self._auto_measure_after_id = None
+        self._auto_measure_token = 0
         self.status_var = ctk.StringVar(value=t(self.language, "initial_status"))
         self.current_file_var = ctk.StringVar(value=t(self.language, "current_file_none"))
         self.language_var = ctk.StringVar(value=language_label(self.language))
@@ -224,6 +226,7 @@ class MainWindow(ctk.CTk):
             messagebox.showwarning(t(self.language, "load_image_failed"), "\n".join(errors[:8]))
 
     def reset_images(self) -> None:
+        self._cancel_auto_measure()
         self.image_items = []
         self.current_index = -1
         self.current_image = None
@@ -261,6 +264,7 @@ class MainWindow(ctk.CTk):
             return
         if index == self.current_index and self.current_image is not None:
             return
+        self._cancel_auto_measure()
         previous_index = self.current_index
         self.current_index = index
         self.load_current_image()
@@ -454,7 +458,7 @@ class MainWindow(ctk.CTk):
             y_min, y_max = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
             if y_max - y_min <= 1e-6:
                 return float((fit_x1 + fit_x2) / 2.0), float(y_min)
-            base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 50.0))))
+            base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 30.0))))
             offset_pct = float(
                 getattr(settings, "right_offset_pct", 0.0)
                 if side == "right"
@@ -470,22 +474,16 @@ class MainWindow(ctk.CTk):
             x1, y1, x2, y2 = settings.roi
             if settings.show_roi:
                 draw.rectangle([point(x1, y1), point(x2, y2)], outline=(0, 210, 255), width=1)
-            drawn_rows = set()
             for side in taper_sides():
                 target = taper_target_point(side)
                 if target is None:
                     continue
                 target_x, target_y_float = target
                 target_y = int(round(target_y_float))
-                if target_y in drawn_rows:
-                    continue
-                drawn_rows.add(target_y)
-                guide_half = max(12, min(28, int(abs(x2 - x1) * scale_x * 0.18)))
+                guide_half = max(8, min(18, int(abs(x2 - x1) * scale_x * 0.055)))
                 cx, cy = point(target_x, target_y)
                 draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(20, 20, 26), width=4)
                 draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(210, 190, 255), width=2)
-                draw.ellipse([(cx - 4, cy - 4), (cx + 4, cy + 4)], fill=(20, 20, 26))
-                draw.ellipse([(cx - 3, cy - 3), (cx + 3, cy + 3)], fill=(210, 190, 255), outline=(20, 20, 26))
 
         if result is not None and settings.show_selected_edges:
             for measurement, color in (
@@ -509,16 +507,6 @@ class MainWindow(ctk.CTk):
                     x1, y1, x2, y2 = taper.fit_line
                     draw.line([point(x1, y1), point(x2, y2)], fill=(20, 20, 26), width=3)
                     draw.line([point(x1, y1), point(x2, y2)], fill=color, width=2)
-            ellipse = result.ellipse_cd
-            if ellipse is not None and ellipse.center_x is not None and ellipse.center_y is not None:
-                if ellipse.horizontal_diameter_px is not None and ellipse.vertical_diameter_px is not None:
-                    cx, cy = point(ellipse.center_x, ellipse.center_y)
-                    rx = int(round(ellipse.horizontal_diameter_px * scale_x * 0.5))
-                    ry = int(round(ellipse.vertical_diameter_px * scale_y * 0.5))
-                    draw.ellipse([(cx - rx, cy - ry), (cx + rx, cy + ry)], outline=(125, 205, 255), width=2)
-                for x, y in ellipse.boundary_points:
-                    px, py = point(x, y)
-                    draw.ellipse([(px - 2, py - 2), (px + 2, py + 2)], fill=(245, 250, 255))
         return thumb
 
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:
@@ -539,6 +527,50 @@ class MainWindow(ctk.CTk):
         self.render_current_image()
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
+
+    def _cancel_auto_measure(self) -> None:
+        if self._auto_measure_after_id is None:
+            return
+        try:
+            self.after_cancel(self._auto_measure_after_id)
+        except ValueError:
+            pass
+        self._auto_measure_after_id = None
+
+    def _schedule_auto_measure(self) -> None:
+        item = self.current_item()
+        if item is None:
+            self._cancel_auto_measure()
+            return
+        settings = self.resolve_settings_for_item(item)
+        if settings.roi is None:
+            self._cancel_auto_measure()
+            return
+        self._cancel_auto_measure()
+        self._auto_measure_token += 1
+        token = self._auto_measure_token
+        self._auto_measure_after_id = self.after(500, lambda: self._run_auto_measure(token))
+
+    def _run_auto_measure(self, token: int) -> None:
+        self._auto_measure_after_id = None
+        if token != self._auto_measure_token:
+            return
+        item = self.current_item()
+        if item is None:
+            return
+        settings = self.resolve_settings_for_item(item)
+        if settings.roi is None:
+            return
+        image = self.load_image_cached(item.image_path)
+        item.result = run_measurement(image, settings)
+        self.load_current_image()
+        self.refresh_thumbnail_panel()
+        self.refresh_result_table()
+        self.set_status(t(self.language, "option_changed").format(
+            file_name=item.file_name,
+            status=self._status_label(item.result.status),
+            confidence=item.result.overall_confidence,
+        ))
 
     def _ensure_item_settings(self, item: ImageItem, source: str = "image_specific") -> MeasurementSettings:
         settings = self.resolve_settings_for_item(item)
@@ -587,6 +619,7 @@ class MainWindow(ctk.CTk):
         if item is None:
             self.global_settings = self.option_panel.get_settings(self.global_settings)
             self.global_settings.settings_source = "global_default"
+            self._cancel_auto_measure()
             return
         base = self.resolve_settings_for_item(item)
         settings = self.option_panel.get_settings(base)
@@ -599,8 +632,10 @@ class MainWindow(ctk.CTk):
         if settings.roi is not None and self.current_image is not None:
             item.result = None
             self.render_current_image(update_option_settings=False)
+            self._schedule_auto_measure()
         else:
             self.render_current_image(update_option_settings=False)
+            self._cancel_auto_measure()
 
     def on_roi_changed(self, roi) -> None:
         item = self.current_item()
@@ -616,6 +651,7 @@ class MainWindow(ctk.CTk):
         item.result = None
         self.set_status(t(self.language, "roi_applied"))
         self.render_current_image()
+        self._schedule_auto_measure()
 
     def on_overlay_toggled(self, enabled: bool) -> None:
         self.overlay_enabled = enabled
@@ -698,6 +734,7 @@ class MainWindow(ctk.CTk):
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:
             return
+        self._cancel_auto_measure()
         scope = force_scope or "current"
         targets = self._targets_for_scope(scope)
         if not targets:

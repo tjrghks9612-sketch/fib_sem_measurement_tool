@@ -80,10 +80,35 @@ def _label(image: np.ndarray, text: str, origin: Tuple[int, int], color: Color, 
     tw, th = _measure_text(text, font)
     x = max(4, min(int(x), image.shape[1] - tw - 10))
     y = max(th + 10, min(int(y), image.shape[0] - 8))
+    text_top = y - th
+    pad_x = 7
+    pad_y = 6
     overlay = image.copy()
-    cv2.rectangle(overlay, (x - 7, y - th - 9), (x + tw + 8, y + 7), BG_PANEL, -1)
+    cv2.rectangle(overlay, (x - pad_x, text_top - pad_y), (x + tw + pad_x, text_top + th + pad_y), BG_PANEL, -1)
     cv2.addWeighted(overlay, 0.82, image, 0.18, 0, image)
-    _draw_text(image, text, (x, y - th), color, font_size)
+    _draw_text(image, text, (x, text_top), color, font_size)
+
+
+def _label_next_to_target(
+    image: np.ndarray,
+    text: str,
+    target: tuple[float, float],
+    side: str,
+    color: Color,
+    scale: float = 0.44,
+) -> None:
+    font_size = max(11, int(round(scale * 28)))
+    font = _ui_font(font_size)
+    tw, th = _measure_text(text, font)
+    marker_half = 22
+    gap = 16
+    target_x, target_y = target
+    if side == "left":
+        x = int(round(target_x)) - marker_half - gap - tw
+    else:
+        x = int(round(target_x)) + marker_half + gap
+    y = int(round(target_y)) + th // 2
+    _label(image, text, (x, y), color, scale=scale)
 
 
 def _draw_dashed_line(
@@ -130,7 +155,7 @@ def _clamp_pct(value: float) -> float:
 
 
 def _taper_target_y(y_min: float, y_max: float, side: str, settings: MeasurementSettings) -> float:
-    base_pct = float(getattr(settings, "base_height_pct", 50.0))
+    base_pct = float(getattr(settings, "base_height_pct", 30.0))
     offset_pct = float(
         getattr(settings, "right_offset_pct", 0.0)
         if side == "right"
@@ -177,7 +202,6 @@ def _draw_taper_height_guides(
     if not sides:
         return
     x1, y1, x2, y2 = [int(v) for v in roi]
-    drawn_rows: set[int] = set()
     for side in sides:
         taper = _taper_for_side(result, side)
         if taper is None:
@@ -187,17 +211,11 @@ def _draw_taper_height_guides(
             continue
         target_x, target_y_float = target
         target_y = int(round(target_y_float))
-        if target_y in drawn_rows:
-            continue
-        drawn_rows.add(target_y)
-        guide_half = int(max(36, min(86, abs(x2 - x1) * 0.18)))
+        guide_half = int(max(18, min(30, abs(x2 - x1) * 0.055)))
         guide_x1 = max(x1, int(round(target_x)) - guide_half)
         guide_x2 = min(x2, int(round(target_x)) + guide_half)
-        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), (20, 20, 26), 6, cv2.LINE_AA)
+        cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), (20, 20, 26), 5, cv2.LINE_AA)
         cv2.line(image, (guide_x1, target_y), (guide_x2, target_y), TAPER_HEIGHT_COLOR, 2, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 8, (20, 20, 26), -1, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 5, TAPER_HEIGHT_COLOR, -1, cv2.LINE_AA)
-        cv2.circle(image, (int(round(target_x)), target_y), 9, TAPER_HEIGHT_COLOR, 1, cv2.LINE_AA)
 
 
 def _draw_distance(image: np.ndarray, result: DistanceResult, settings: MeasurementSettings, color: Color, label_prefix: str) -> None:
@@ -245,9 +263,14 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
         if settings.show_labels:
             angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
             side = taper_side_label(language, taper.side)
-            label_x = int(round(max(x1, x2) + 12 if taper.side == "left" else min(x1, x2) - 92))
-            label_y = int(round(min(y1, y2) + 28))
-            _label(image, f"{side} {t(language, 'taper')} {angle:.1f} deg", (label_x, label_y), color, scale=0.44)
+            target = _taper_fit_target_point(taper, settings)
+            text = f"{side} {t(language, 'taper')} {angle:.1f} deg"
+            if target is not None:
+                _label_next_to_target(image, text, target, taper.side, color, scale=0.44)
+            else:
+                label_x = int(round(max(x1, x2) + 12 if taper.side == "left" else min(x1, x2) - 92))
+                label_y = int(round(min(y1, y2) + 28))
+                _label(image, text, (label_x, label_y), color, scale=0.44)
 
 
 def _draw_ellipse_cd(image: np.ndarray, result: EllipseCDResult, settings: MeasurementSettings, language: str) -> None:
