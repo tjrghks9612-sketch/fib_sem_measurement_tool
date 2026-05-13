@@ -12,6 +12,7 @@ MEASUREMENT_TYPES = {
     "distance_vertical": "세로 THK",
     "distance_both": "가로 + 세로",
     "hole_cd": "Hole CD 측정",
+    "crater": "Crater 측정",
 }
 
 MEASUREMENT_TYPE_BY_LABEL = {label: key for key, label in MEASUREMENT_TYPES.items()}

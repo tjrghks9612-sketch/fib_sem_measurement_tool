@@ -13,6 +13,8 @@ class UiMeasurementOptionsTest(unittest.TestCase):
         self.assertNotIn("ellipse_cd", THUMBNAIL_MEASUREMENT_KEYS)
         self.assertIn("hole_cd", OPTION_MEASUREMENT_KEYS)
         self.assertIn("hole_cd", THUMBNAIL_MEASUREMENT_KEYS)
+        self.assertIn("crater", OPTION_MEASUREMENT_KEYS)
+        self.assertIn("crater", THUMBNAIL_MEASUREMENT_KEYS)
         for labels in MEASUREMENT_LABELS.values():
             self.assertNotIn("ellipse_cd", labels)
 
@@ -62,6 +64,17 @@ class UiMeasurementOptionsTest(unittest.TestCase):
         self.assertTrue(visibility["hole_target"])
         self.assertTrue(visibility["minimum_delta"])
         self.assertTrue(visibility["calibration"])
+        self.assertFalse(visibility["representative_value"])
+        self.assertFalse(visibility["edge_scan_start"])
+        self.assertFalse(visibility["taper_height"])
+
+    def test_crater_only_shows_crater_relevant_options(self) -> None:
+        visibility = option_visibility_for_measurement_type("crater")
+
+        self.assertTrue(visibility["minimum_delta"])
+        self.assertTrue(visibility["calibration"])
+        self.assertTrue(visibility["fit_line"])
+        self.assertFalse(visibility["hole_target"])
         self.assertFalse(visibility["representative_value"])
         self.assertFalse(visibility["edge_scan_start"])
         self.assertFalse(visibility["taper_height"])

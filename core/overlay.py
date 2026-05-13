@@ -320,6 +320,45 @@ def _draw_hole_cd(image: np.ndarray, result, settings: MeasurementSettings) -> N
         _label(image, label, (int(round(x_max)) + 8, cy - 8), (80, 205, 255), scale=0.48)
 
 
+def _draw_line_tuple(image: np.ndarray, line, color: Color, thickness: int = 2) -> None:
+    if not line:
+        return
+    x1, y1, x2, y2 = line
+    p1 = (int(round(x1)), int(round(y1)))
+    p2 = (int(round(x2)), int(round(y2)))
+    cv2.line(image, p1, p2, (20, 20, 26), thickness + 3, cv2.LINE_AA)
+    cv2.line(image, p1, p2, color, thickness, cv2.LINE_AA)
+
+
+def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> None:
+    if result.top_profile_points:
+        points = np.asarray(result.top_profile_points, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(image, [points], False, (80, 205, 255), 2, cv2.LINE_AA)
+    _draw_line_tuple(image, result.baseline_line, THK_COLOR, 2)
+    _draw_line_tuple(image, result.cd_line, CD_COLOR, 2)
+    _draw_line_tuple(image, result.thk_line, THK_COLOR, 2)
+    if settings.show_fit_line:
+        _draw_line_tuple(image, result.left_taper_line, TAPER_LEFT_COLOR, 2)
+        _draw_line_tuple(image, result.right_taper_line, TAPER_RIGHT_COLOR, 2)
+    for point in ((result.left_foot_x, result.left_foot_y), (result.right_foot_x, result.right_foot_y)):
+        if point[0] is not None and point[1] is not None:
+            cv2.circle(image, (int(round(point[0])), int(round(point[1]))), 4, POINT_COLOR, -1, cv2.LINE_AA)
+            cv2.circle(image, (int(round(point[0])), int(round(point[1]))), 6, CD_COLOR, 1, cv2.LINE_AA)
+    if settings.show_labels:
+        if result.cd_line and result.cd_px is not None:
+            x1, y1, x2, y2 = result.cd_line
+            _label(image, f"Crater CD {_format_value(result.cd_px, settings)}", (int((x1 + x2) * 0.5), int((y1 + y2) * 0.5) - 10), CD_COLOR, scale=0.46)
+        if result.thk_line and result.thk_px is not None:
+            x1, y1, x2, y2 = result.thk_line
+            _label(image, f"THK {_format_value(result.thk_px, settings)}", (int(max(x1, x2)) + 8, int((y1 + y2) * 0.5)), THK_COLOR, scale=0.46)
+        if result.left_taper_line and result.left_taper_angle_horizontal is not None:
+            x1, y1, x2, y2 = result.left_taper_line
+            _label(image, f"L {result.left_taper_angle_horizontal:.1f} deg", (int(min(x1, x2)) - 10, int(min(y1, y2)) - 8), TAPER_LEFT_COLOR, scale=0.42)
+        if result.right_taper_line and result.right_taper_angle_horizontal is not None:
+            x1, y1, x2, y2 = result.right_taper_line
+            _label(image, f"R {result.right_taper_angle_horizontal:.1f} deg", (int(max(x1, x2)) + 8, int(min(y1, y2)) - 8), TAPER_RIGHT_COLOR, scale=0.42)
+
+
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings, language: str) -> None:
     if not settings.show_labels:
         return
@@ -332,6 +371,8 @@ def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], setting
         rows.append((measurement_label(language, "ellipse_cd"), ELLIPSE_COLOR))
     if result and result.hole_cd:
         rows.append((measurement_label(language, "hole_cd"), (80, 205, 255)))
+    if result and result.crater:
+        rows.append((measurement_label(language, "crater"), (80, 205, 255)))
     if settings.roi is not None and _taper_sides(settings):
         rows.append((t(language, "taper_height"), TAPER_HEIGHT_COLOR))
 
@@ -368,6 +409,12 @@ def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: Measur
         lines.append(f"{t(language, 'ellipse_cd_horizontal')} {_format_value(result.ellipse_cd.horizontal_diameter_px, settings)}")
     if result.ellipse_cd and result.ellipse_cd.vertical_diameter_px is not None:
         lines.append(f"{t(language, 'ellipse_cd_vertical')} {_format_value(result.ellipse_cd.vertical_diameter_px, settings)}")
+    if result.crater and result.crater.cd_px is not None:
+        lines.append(f"Crater CD {_format_value(result.crater.cd_px, settings)}")
+        if result.crater.thk_px is not None:
+            lines.append(f"Crater THK {_format_value(result.crater.thk_px, settings)}")
+        if result.crater.avg_taper_angle is not None:
+            lines.append(f"{t(language, 'average_taper')} {result.crater.avg_taper_angle:.1f} deg")
 
     x = 16
     y = 20
@@ -414,6 +461,8 @@ def draw_overlay(
                 _draw_ellipse_cd(canvas, result.ellipse_cd, settings, language)
             if result.hole_cd:
                 _draw_hole_cd(canvas, result.hole_cd, settings)
+            if result.crater:
+                _draw_crater(canvas, result.crater, settings)
         if result.left_taper:
             _draw_taper(canvas, result.left_taper, TAPER_LEFT_COLOR, settings, language)
         if result.right_taper:

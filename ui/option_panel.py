@@ -30,6 +30,7 @@ MEASUREMENT_KEYS = (
     "distance_vertical",
     "distance_both",
     "hole_cd",
+    "crater",
 )
 DISTANCE_METHOD_KEYS = ("mean", "max", "min")
 EDGE_SCAN_MODE_KEYS = ("auto", "outside_to_center", "center_to_outside")
@@ -40,22 +41,23 @@ def option_visibility_for_measurement_type(measurement_type: str, boundary_angle
     is_distance = measurement_type in {"distance_horizontal", "distance_vertical", "distance_both"}
     is_taper = measurement_type in {"taper_single", "taper_double"}
     is_hole = measurement_type == "hole_cd"
+    is_crater = measurement_type == "crater"
     return {
         "hole_target": is_hole,
         "taper_side": measurement_type == "taper_single",
         "representative_value": is_distance,
         "edge_scan_start": is_distance or is_taper,
-        "minimum_delta": is_distance or is_taper or is_hole,
+        "minimum_delta": is_distance or is_taper or is_hole or is_crater,
         "normalize_signal": is_distance,
         "denoise_signal": is_distance,
         "boundary_angle_filter": is_distance,
         "max_boundary_angle": is_distance and boundary_angle_filter_enabled,
         "taper_height": is_taper,
-        "selected_edges": is_distance or is_taper or is_hole,
-        "fit_line": is_taper,
-        "ROI": is_distance or is_taper or is_hole,
-        "labels": is_distance or is_taper or is_hole,
-        "calibration": is_distance or is_hole,
+        "selected_edges": is_distance or is_taper or is_hole or is_crater,
+        "fit_line": is_taper or is_crater,
+        "ROI": is_distance or is_taper or is_hole or is_crater,
+        "labels": is_distance or is_taper or is_hole or is_crater,
+        "calibration": is_distance or is_hole or is_crater,
     }
 
 
@@ -479,6 +481,14 @@ class OptionPanel(ctk.CTkFrame):
             return f"THK {result.vertical_thk.selected_px * scale:.4g} {unit}"
         if result.hole_cd and result.hole_cd.horizontal_px is not None:
             return f"Hole CD {result.hole_cd.horizontal_px * scale:.4g} x {result.hole_cd.vertical_px * scale:.4g} {unit}"
+        if result.crater and result.crater.cd_px is not None:
+            thk = result.crater.thk_px * scale if result.crater.thk_px is not None else 0.0
+            left = result.crater.left_taper_angle_horizontal
+            right = result.crater.right_taper_angle_horizontal
+            taper = ""
+            if left is not None and right is not None:
+                taper = f" / L {left:.1f} deg R {right:.1f} deg"
+            return f"Crater CD {result.crater.cd_px * scale:.4g} {unit} / THK {thk:.4g} {unit}{taper}"
         if result.avg_taper_angle is not None:
             return f"{t(self.language, 'average_taper')} {result.avg_taper_angle:.2f} deg"
         if result.left_taper and result.left_taper.angle_horizontal is not None:

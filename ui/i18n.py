@@ -19,6 +19,7 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_vertical": "세로 THK",
         "distance_both": "가로 + 세로",
         "hole_cd": "Hole CD 측정",
+        "crater": "Crater 측정",
     },
     "en": {
         "taper_single": "Single taper",
@@ -27,6 +28,7 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_vertical": "Vertical THK",
         "distance_both": "Horizontal + Vertical",
         "hole_cd": "Hole CD",
+        "crater": "Crater",
     },
     "vi": {
         "taper_single": "Taper một bên",
@@ -35,6 +37,7 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_vertical": "THK dọc",
         "distance_both": "Ngang + Dọc",
         "hole_cd": "Hole CD",
+        "crater": "Crater",
     },
 }
 

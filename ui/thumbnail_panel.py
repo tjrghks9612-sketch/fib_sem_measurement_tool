@@ -17,6 +17,7 @@ MEASUREMENT_KEYS = (
     "distance_vertical",
     "distance_both",
     "hole_cd",
+    "crater",
 )
 STATUS_KEYS = ("OK", "Check", "Review Needed", "Fail", "Not measured")
 

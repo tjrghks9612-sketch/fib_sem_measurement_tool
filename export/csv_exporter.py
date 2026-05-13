@@ -125,6 +125,42 @@ CSV_COLUMNS = [
     "hole_cd_ellipse_angle_deg",
     "hole_cd_ellipse_fit_error",
     "hole_cd_ellipse_aspect_ratio",
+    "crater_cd_px",
+    "crater_cd",
+    "crater_thk_px",
+    "crater_thk",
+    "crater_thk_mean_px",
+    "crater_thk_max_px",
+    "crater_thk_min_px",
+    "crater_thk_median_px",
+    "crater_left_foot_x",
+    "crater_left_foot_y",
+    "crater_right_foot_x",
+    "crater_right_foot_y",
+    "crater_baseline_y_left",
+    "crater_baseline_y_right",
+    "crater_baseline_slope",
+    "crater_baseline_intercept",
+    "crater_baseline_confidence",
+    "crater_center_x",
+    "crater_top_y_at_center",
+    "crater_baseline_y_at_center",
+    "crater_left_taper_angle_horizontal",
+    "crater_right_taper_angle_horizontal",
+    "crater_left_taper_angle_vertical",
+    "crater_right_taper_angle_vertical",
+    "crater_avg_taper_angle",
+    "crater_taper_angle_diff",
+    "crater_left_taper_fit_error",
+    "crater_right_taper_fit_error",
+    "crater_left_taper_valid_count",
+    "crater_right_taper_valid_count",
+    "crater_top_profile_valid_count",
+    "crater_top_profile_coverage",
+    "crater_top_profile_smoothness",
+    "crater_overall_confidence",
+    "crater_status",
+    "crater_warning_message",
 ]
 
 
@@ -214,6 +250,47 @@ def _hole_cd_values(row: Dict[str, object], result, settings: MeasurementSetting
     row["hole_cd_ellipse_aspect_ratio"] = result.ellipse_aspect_ratio
 
 
+def _crater_values(row: Dict[str, object], result) -> None:
+    if result is None:
+        return
+    row["crater_cd_px"] = result.cd_px
+    row["crater_cd"] = result.cd
+    row["crater_thk_px"] = result.thk_px
+    row["crater_thk"] = result.thk
+    row["crater_thk_mean_px"] = result.thk_mean_px
+    row["crater_thk_max_px"] = result.thk_max_px
+    row["crater_thk_min_px"] = result.thk_min_px
+    row["crater_thk_median_px"] = result.thk_median_px
+    row["crater_left_foot_x"] = result.left_foot_x
+    row["crater_left_foot_y"] = result.left_foot_y
+    row["crater_right_foot_x"] = result.right_foot_x
+    row["crater_right_foot_y"] = result.right_foot_y
+    row["crater_baseline_y_left"] = result.baseline_y_left
+    row["crater_baseline_y_right"] = result.baseline_y_right
+    row["crater_baseline_slope"] = result.baseline_slope
+    row["crater_baseline_intercept"] = result.baseline_intercept
+    row["crater_baseline_confidence"] = result.baseline_confidence
+    row["crater_center_x"] = result.center_x
+    row["crater_top_y_at_center"] = result.top_y_at_center
+    row["crater_baseline_y_at_center"] = result.baseline_y_at_center
+    row["crater_left_taper_angle_horizontal"] = result.left_taper_angle_horizontal
+    row["crater_right_taper_angle_horizontal"] = result.right_taper_angle_horizontal
+    row["crater_left_taper_angle_vertical"] = result.left_taper_angle_vertical
+    row["crater_right_taper_angle_vertical"] = result.right_taper_angle_vertical
+    row["crater_avg_taper_angle"] = result.avg_taper_angle
+    row["crater_taper_angle_diff"] = result.taper_angle_diff
+    row["crater_left_taper_fit_error"] = result.left_taper_fit_error
+    row["crater_right_taper_fit_error"] = result.right_taper_fit_error
+    row["crater_left_taper_valid_count"] = result.left_taper_valid_count
+    row["crater_right_taper_valid_count"] = result.right_taper_valid_count
+    row["crater_top_profile_valid_count"] = result.top_profile_valid_count
+    row["crater_top_profile_coverage"] = result.top_profile_coverage
+    row["crater_top_profile_smoothness"] = result.top_profile_smoothness
+    row["crater_overall_confidence"] = result.overall_confidence
+    row["crater_status"] = result.status
+    row["crater_warning_message"] = result.warning_message
+
+
 def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str, object]:
     result: Optional[MeasurementResult] = item.result
     roi = settings.roi or ("", "", "", "")
@@ -251,6 +328,7 @@ def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str,
     _distance_values("horizontal_cd", row, result.horizontal_cd, settings)
     _distance_values("vertical_thk", row, result.vertical_thk, settings)
     _hole_cd_values(row, result.hole_cd, settings)
+    _crater_values(row, result.crater)
     row["overall_confidence"] = result.overall_confidence
     row["status"] = result.status
     row["warning_message"] = result.warning_message
