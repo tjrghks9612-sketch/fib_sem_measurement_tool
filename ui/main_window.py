@@ -3,11 +3,12 @@
 from collections import OrderedDict
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import customtkinter as ctk
 from PIL import Image, ImageDraw
 
+from fib_sem_measurement_tool.core.calibration import apply_calibration, detect_scale_bar
 from fib_sem_measurement_tool.core.image_io import (
     filter_image_paths,
     list_image_files,
@@ -56,6 +57,7 @@ class MainWindow(ctk.CTk):
         self.current_image = None
         self.current_image_path = ""
         self.overlay_enabled = True
+        self.scale_bar_bboxes: Dict[str, tuple] = {}
         self._profile_image_path = ""
         self._last_option_signature = None
         self._last_measured_settings: Optional[MeasurementSettings] = None
@@ -144,6 +146,8 @@ class MainWindow(ctk.CTk):
         self.option_panel = OptionPanel(
             main,
             on_option_changed=self.on_option_changed,
+            on_apply_calibration=self.apply_calibration_to_scope,
+            on_detect_scale_bar=self.detect_current_scale_bar,
             language=self.language,
         )
         self.option_panel.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
@@ -232,6 +236,7 @@ class MainWindow(ctk.CTk):
         self.current_index = -1
         self.current_image = None
         self.current_image_path = ""
+        self.scale_bar_bboxes.clear()
         self.image_cache.clear()
         self.render_cache.clear()
         self.thumbnail_overlay_cache.clear()
@@ -268,6 +273,7 @@ class MainWindow(ctk.CTk):
         self.image_items = [item for index, item in enumerate(self.image_items) if index not in selected_set]
         for path in removed_paths:
             self.image_cache.pop(path, None)
+            self.scale_bar_bboxes.pop(path, None)
         self.render_cache.clear()
         self.thumbnail_overlay_cache.clear()
         self._profile_image_path = ""
@@ -400,6 +406,7 @@ class MainWindow(ctk.CTk):
         self.option_panel.set_candidate_summary(item.result, settings)
 
     def _render_cache_key(self, item: ImageItem, settings: MeasurementSettings):
+        scale_bar_bbox = self.scale_bar_bboxes.get(item.image_path)
         calibration = settings.calibration
         return (
             item.image_path,
@@ -436,6 +443,7 @@ class MainWindow(ctk.CTk):
             settings.show_roi,
             settings.show_labels,
             self.language,
+            scale_bar_bbox,
         )
 
     def get_rendered_preview(self, item: ImageItem, settings: MeasurementSettings):
@@ -450,6 +458,7 @@ class MainWindow(ctk.CTk):
             item.result,
             settings,
             show_overlay=self.overlay_enabled,
+            scale_bar_bbox=self.scale_bar_bboxes.get(item.image_path),
             language=self.language,
         )
         self.render_cache[key] = rendered
@@ -720,6 +729,27 @@ class MainWindow(ctk.CTk):
         self.overlay_enabled = enabled
         self.render_current_image()
 
+    def detect_current_scale_bar(self) -> None:
+        item = self.current_item()
+        if item is None or self.current_image is None:
+            return
+        result = detect_scale_bar(self.current_image)
+        if result.get("status") == "detected":
+            pixel_length = result.get("pixel_length")
+            settings = self._ensure_item_settings(item, "image_specific")
+            settings.calibration.detected_scale_bar_px = float(pixel_length)
+            settings.calibration.mode = "auto"
+            self.option_panel.set_detected_scale_bar(float(pixel_length))
+            self.scale_bar_bboxes[item.image_path] = result.get("bbox")
+            self.set_status(t(self.language, "scale_bar_detected").format(pixel_length=pixel_length))
+        else:
+            settings = self._ensure_item_settings(item, "image_specific")
+            settings.calibration.detected_scale_bar_px = None
+            self.option_panel.set_detected_scale_bar(None)
+            self.set_status(str(result.get("message", t(self.language, "scale_bar_failed"))))
+            messagebox.showinfo(t(self.language, "scale_bar_detection"), str(result.get("message", t(self.language, "scale_bar_failed"))))
+        self.render_current_image()
+
     def on_manual_points(self, points: list[tuple[int, int]]) -> None:
         item = self.current_item()
         if item is None or self.current_image is None:
@@ -766,6 +796,28 @@ class MainWindow(ctk.CTk):
             self.render_cache.clear()
             self.thumbnail_overlay_cache.clear()
         return applied
+
+    def apply_calibration_to_scope(self) -> None:
+        mode, pixel_length, actual_length, unit = self.option_panel.get_calibration_inputs()
+        calibration = apply_calibration(pixel_length, actual_length, unit, mode=mode)
+        if calibration.status != "calibrated":
+            messagebox.showwarning(t(self.language, "calibration_failed"), t(self.language, "calibration_failed_message"))
+            return
+        item = self.current_item()
+        if item is None:
+            self.global_settings.calibration = calibration
+            self.set_status(t(self.language, "default_calibration_applied").format(scale=calibration.px_to_real, unit=unit))
+        else:
+            settings = self._ensure_item_settings(item, "image_specific")
+            settings.calibration = calibration
+            self.set_status(
+                t(self.language, "image_calibration_applied").format(
+                    file_name=item.file_name,
+                    scale=calibration.px_to_real,
+                    unit=unit,
+                )
+            )
+        self.render_current_image()
 
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:

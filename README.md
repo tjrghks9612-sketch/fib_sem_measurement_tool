@@ -87,7 +87,7 @@ The UI uses a dark metrology dashboard layout:
 
 - Left panel: image list and per-image result summary
 - Center: FIB/SEM image viewer with ROI and overlay layers
-- Right inspector: measurement settings, overlay controls, candidate summary, and selected result
+- Right inspector: measurement settings, overlay controls, candidate summary, selected result, calibration
 
 Overlay layers:
 

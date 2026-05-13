@@ -188,7 +188,7 @@ class ThumbnailPanel(ctk.CTkFrame):
         card.grid_columnconfigure(2, weight=1)
         var = tk.BooleanVar(value=item.selected)
         check = ctk.CTkCheckBox(card, text="", width=22, variable=var, command=lambda i=index, v=var: self._toggle(i, v))
-        check.grid(row=0, column=0, rowspan=4, padx=(8, 4), pady=8, sticky="ns")
+        check.grid(row=0, column=0, rowspan=5, padx=(8, 4), pady=8, sticky="ns")
 
         preview = self.render_thumbnail(item, settings)
         if preview is not None:
@@ -197,7 +197,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             thumb = ctk.CTkLabel(card, text="", image=image)
         else:
             thumb = ctk.CTkLabel(card, text=t(self.language, "no_preview"), width=124, height=80)
-        thumb.grid(row=0, column=1, rowspan=4, padx=6, pady=8)
+        thumb.grid(row=0, column=1, rowspan=5, padx=6, pady=8)
 
         number = ctk.CTkLabel(card, text=f"{index + 1:02d}", fg_color="#164c94", corner_radius=4, width=28)
         number.grid(row=0, column=2, sticky="w", padx=(2, 0), pady=(8, 0))
@@ -210,10 +210,18 @@ class ThumbnailPanel(ctk.CTkFrame):
         ctk.CTkLabel(card, text=f"{type_text} | {roi_text} | {source_text}", anchor="w", text_color="#c7d2df").grid(
             row=2, column=2, sticky="ew", padx=2
         )
+        calibration_text = {
+            "not_calibrated": t(self.language, "not_calibrated"),
+            "calibrated": t(self.language, "calibrated"),
+        }.get(settings.calibration.status, settings.calibration.status)
+        ctk.CTkLabel(card, text=f"{t(self.language, 'calibration')}: {calibration_text}", anchor="w", text_color="#8ea0b1").grid(
+            row=3, column=2, sticky="ew", padx=2
+        )
+
         status = item.result.status if item.result else "Not measured"
         summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else t(self.language, "before_measurement")
         ctk.CTkLabel(card, text=summary, anchor="w", text_color=self._status_color(status)).grid(
-            row=3, column=2, sticky="ew", padx=2, pady=(0, 8)
+            row=4, column=2, sticky="ew", padx=2, pady=(0, 8)
         )
 
         self._bind_card_selection(card, index)

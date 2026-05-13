@@ -369,6 +369,7 @@ def draw_overlay(
     result: Optional[MeasurementResult],
     settings: MeasurementSettings,
     show_overlay: bool = True,
+    scale_bar_bbox: Optional[Tuple[int, int, int, int]] = None,
     language: str = "ko",
 ) -> np.ndarray:
     canvas = image.copy()
@@ -379,6 +380,11 @@ def draw_overlay(
         _draw_dashed_rect(canvas, roi, ROI_COLOR, settings.show_labels)
     if roi is not None:
         _draw_taper_height_guides(canvas, roi, settings, result)
+    if scale_bar_bbox:
+        x1, y1, x2, y2 = [int(v) for v in scale_bar_bbox]
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
+        if settings.show_labels:
+            _label(canvas, t(language, "scale_bar"), (x1, y1 - 8), (255, 255, 90), scale=0.48)
     if result is not None:
         if settings.show_selected_edges:
             if result.horizontal_cd:

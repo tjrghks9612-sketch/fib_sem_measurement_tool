@@ -24,6 +24,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
             self.assertTrue(visibility["normalize_signal"])
             self.assertTrue(visibility["denoise_signal"])
             self.assertTrue(visibility["boundary_angle_filter"])
+            self.assertTrue(visibility["calibration"])
             self.assertFalse(visibility["taper_side"])
             self.assertFalse(visibility["taper_height"])
             self.assertFalse(visibility["fit_line"])
@@ -42,6 +43,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
             self.assertFalse(visibility["normalize_signal"])
             self.assertFalse(visibility["denoise_signal"])
             self.assertFalse(visibility["boundary_angle_filter"])
+            self.assertFalse(visibility["calibration"])
 
     def test_max_boundary_angle_only_shows_when_angle_filter_is_on(self) -> None:
         hidden = option_visibility_for_measurement_type("distance_horizontal", boundary_angle_filter_enabled=False)
