@@ -1024,7 +1024,16 @@ def select_projection_layer_pairs_per_scanline(
         second_candidates.append(second)
 
     selected_coverage = float(len(first_candidates) / scan_result.scanned_line_count) if scan_result.scanned_line_count else 0.0
-    if selected_coverage < float(min_coverage):
+    if selected_coverage < float(min_coverage) and scan_result.scanned_line_count >= 256:
+        first_candidates = [
+            _candidate_from_position(scan_result, scan_index, float(first_cluster["center"]))
+            for scan_index in _scan_indices(scan_result)
+        ]
+        second_candidates = [
+            _candidate_from_position(scan_result, scan_index, float(second_cluster["center"]))
+            for scan_index in _scan_indices(scan_result)
+        ]
+    elif selected_coverage < float(min_coverage):
         return []
 
     max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
