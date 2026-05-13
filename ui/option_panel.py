@@ -57,15 +57,11 @@ class OptionPanel(ctk.CTkFrame):
         self,
         master,
         on_option_changed: Callable[[], None],
-        on_apply_calibration: Callable[[], None],
-        on_detect_scale_bar: Callable[[], None],
         language: str = "ko",
         **kwargs,
     ):
         super().__init__(master, fg_color="#0d1721", border_color="#223242", border_width=1, corner_radius=6, **kwargs)
         self.on_option_changed = on_option_changed
-        self.on_apply_calibration = on_apply_calibration
-        self.on_detect_scale_bar = on_detect_scale_bar
         self.language = language
         self._loading = False
         self._slider_change_after_id = None
@@ -83,9 +79,6 @@ class OptionPanel(ctk.CTkFrame):
         self.normalize_signal_var = tk.BooleanVar(value=False)
         self.denoise_signal_var = tk.BooleanVar(value=False)
         self.boundary_angle_filter_var = tk.BooleanVar(value=False)
-        self.detected_px_var = tk.StringVar(value="")
-        self.actual_length_var = tk.StringVar(value="")
-        self.unit_var = tk.StringVar(value="um")
         self.show_selected_var = tk.BooleanVar(value=True)
         self.show_fit_var = tk.BooleanVar(value=True)
         self.show_roi_var = tk.BooleanVar(value=True)
@@ -234,19 +227,6 @@ class OptionPanel(ctk.CTkFrame):
             font=ctk.CTkFont(size=18, weight="bold"),
         ).pack(fill="x", pady=(0, 8))
 
-        self._section_label("section_calibration")
-        self.detect_scale_bar_button = ctk.CTkButton(
-            self.body, text=t(self.language, "detect_scale_bar"), command=self.on_detect_scale_bar, height=32
-        )
-        self.detect_scale_bar_button.pack(fill="x", pady=(4, 6))
-        self._entry_row("detected_px", self.detected_px_var)
-        self._entry_row("actual_length", self.actual_length_var)
-        self._combo_row("unit", self.unit_var, ["nm", "um", "mm"], lambda _v: self._changed())
-        self.apply_calibration_button = ctk.CTkButton(
-            self.body, text=t(self.language, "apply_calibration"), command=self.on_apply_calibration, height=32
-        )
-        self.apply_calibration_button.pack(fill="x", pady=(6, 10))
-
     def _section_label(self, key: str) -> None:
         label = ctk.CTkLabel(self.body, text=t(self.language, key), font=ctk.CTkFont(size=13, weight="bold"), anchor="w", text_color="#f2f6fa")
         label.pack(fill="x", pady=(12, 5))
@@ -367,7 +347,6 @@ class OptionPanel(ctk.CTkFrame):
             settings.max_cd_thk_boundary_angle_deg,
         )
         settings.base_height_pct = self._float(self.taper_height_var.get().replace("%", ""), settings.base_height_pct)
-        settings.calibration.unit = self.unit_var.get()
         settings.show_raw_candidates = False
         settings.show_selected_edges = bool(self.show_selected_var.get())
         settings.show_fit_line = bool(self.show_fit_var.get())
@@ -387,15 +366,6 @@ class OptionPanel(ctk.CTkFrame):
         self.edge_scan_mode_var.set(edge_scan_mode_label(self.language, getattr(settings, "edge_scan_mode", "auto")))
         self.normalize_signal_var.set(bool(getattr(settings, "normalize_grayscale_profiles", False)))
         self.denoise_signal_var.set(bool(getattr(settings, "denoise_grayscale_profiles", False)))
-        self.unit_var.set(settings.calibration.unit if settings.calibration.unit != "px" else "um")
-        self.detected_px_var.set(
-            "" if settings.calibration.detected_scale_bar_px is None else f"{settings.calibration.detected_scale_bar_px:.3f}"
-        )
-        self.actual_length_var.set(
-            ""
-            if settings.calibration.actual_scale_bar_length is None
-            else f"{settings.calibration.actual_scale_bar_length:.6g}"
-        )
         delta = max(1, min(255, int(round(float(settings.minimum_grayscale_delta)))))
         self.delta_var.set(str(delta))
         if hasattr(self, "delta_slider"):
@@ -464,20 +434,6 @@ class OptionPanel(ctk.CTkFrame):
             return f"{t(self.language, 'right_taper')} {result.right_taper.angle_horizontal:.2f} deg"
         return t(self.language, "no_selected_result")
 
-    def get_calibration_inputs(self):
-        try:
-            pixel_length = float(self.detected_px_var.get())
-        except (TypeError, ValueError):
-            pixel_length = 0.0
-        try:
-            actual_length = float(self.actual_length_var.get())
-        except (TypeError, ValueError):
-            actual_length = 0.0
-        return "auto", pixel_length, actual_length, self.unit_var.get()
-
-    def set_detected_scale_bar(self, pixel_length: Optional[float]) -> None:
-        self.detected_px_var.set("" if pixel_length is None else f"{pixel_length:.3f}")
-
     def set_language(self, language: str) -> None:
         if language == self.language:
             return
@@ -488,8 +444,6 @@ class OptionPanel(ctk.CTkFrame):
             self.header_label.configure(text=t(self.language, "option_header"))
             for widget, key in self._translatable_widgets:
                 widget.configure(text=t(self.language, key))
-            self.detect_scale_bar_button.configure(text=t(self.language, "detect_scale_bar"))
-            self.apply_calibration_button.configure(text=t(self.language, "apply_calibration"))
             if self.taper_left_radio is not None:
                 self.taper_left_radio.configure(text=taper_side_label(self.language, "left"))
             if self.taper_right_radio is not None:
