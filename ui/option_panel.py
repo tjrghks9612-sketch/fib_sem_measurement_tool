@@ -32,6 +32,26 @@ DISTANCE_METHOD_KEYS = ("mean", "max", "min")
 EDGE_SCAN_MODE_KEYS = ("auto", "outside_to_center", "center_to_outside")
 
 
+def option_visibility_for_measurement_type(measurement_type: str, boundary_angle_filter_enabled: bool = False) -> dict[str, bool]:
+    is_distance = measurement_type in {"distance_horizontal", "distance_vertical", "distance_both"}
+    is_taper = measurement_type in {"taper_single", "taper_double"}
+    return {
+        "taper_side": measurement_type == "taper_single",
+        "representative_value": is_distance,
+        "edge_scan_start": is_distance or is_taper,
+        "minimum_delta": is_distance or is_taper,
+        "normalize_signal": is_distance,
+        "denoise_signal": is_distance,
+        "boundary_angle_filter": is_distance,
+        "max_boundary_angle": is_distance and boundary_angle_filter_enabled,
+        "taper_height": is_taper,
+        "selected_edges": is_distance or is_taper,
+        "fit_line": is_taper,
+        "ROI": is_distance or is_taper,
+        "labels": is_distance or is_taper,
+    }
+
+
 class OptionPanel(ctk.CTkFrame):
     def __init__(
         self,
@@ -127,6 +147,10 @@ class OptionPanel(ctk.CTkFrame):
         self.edge_scan_mode_menu = None
         self.max_boundary_angle_slider = None
         self.taper_height_slider = None
+        visibility = option_visibility_for_measurement_type(
+            self._measurement_type_key(),
+            bool(self.boundary_angle_filter_var.get()),
+        )
 
         self._section_label("section_measurement")
         self.measurement_type_menu = self._combo_row(
@@ -137,42 +161,45 @@ class OptionPanel(ctk.CTkFrame):
         )
         self._value_row("ROI", self.roi_var)
 
-        if self._is_taper_mode() and self._measurement_type_key() == "taper_single":
+        if visibility["taper_side"]:
             self._radio_row(
                 "taper_side",
                 self.taper_side_var,
                 [(taper_side_label(self.language, "left"), "left"), (taper_side_label(self.language, "right"), "right")],
             )
-        if self._is_distance_mode():
+        if visibility["representative_value"]:
             self.distance_method_menu = self._combo_row(
                 "representative_value",
                 self.distance_method_var,
                 [distance_method_label(self.language, key) for key in DISTANCE_METHOD_KEYS],
                 lambda _v: self._changed(),
             )
-        if self._is_distance_mode() or self._is_taper_mode():
+        if visibility["edge_scan_start"]:
             self.edge_scan_mode_menu = self._combo_row(
                 "edge_scan_start",
                 self.edge_scan_mode_var,
                 [edge_scan_mode_label(self.language, key) for key in EDGE_SCAN_MODE_KEYS],
                 lambda _v: self._changed(),
             )
-        row = self._row("minimum_delta")
-        self.delta_slider = ctk.CTkSlider(row, from_=1, to=255, command=self._delta_changed)
-        self.delta_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-        ctk.CTkLabel(row, textvariable=self.delta_var, width=46, anchor="e", text_color="#dbe7f2").grid(row=0, column=2, sticky="e")
-        if self._is_distance_mode():
+        if visibility["minimum_delta"]:
+            row = self._row("minimum_delta")
+            self.delta_slider = ctk.CTkSlider(row, from_=1, to=255, command=self._delta_changed)
+            self.delta_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+            ctk.CTkLabel(row, textvariable=self.delta_var, width=46, anchor="e", text_color="#dbe7f2").grid(row=0, column=2, sticky="e")
+        if visibility["normalize_signal"]:
             self._switch_row("normalize_signal", self.normalize_signal_var)
+        if visibility["denoise_signal"]:
             self._switch_row("denoise_signal", self.denoise_signal_var)
+        if visibility["boundary_angle_filter"]:
             self._switch_row("boundary_angle_filter", self.boundary_angle_filter_var, command=self._boundary_angle_filter_changed)
-            if bool(self.boundary_angle_filter_var.get()):
-                row = self._row("max_boundary_angle")
-                self.max_boundary_angle_slider = ctk.CTkSlider(row, from_=1, to=45, command=self._max_boundary_angle_changed)
-                self.max_boundary_angle_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
-                ctk.CTkLabel(row, textvariable=self.max_boundary_angle_var, width=46, anchor="e", text_color="#dbe7f2").grid(
-                    row=0, column=2, sticky="e"
-                )
-        if self._is_taper_mode():
+        if visibility["max_boundary_angle"]:
+            row = self._row("max_boundary_angle")
+            self.max_boundary_angle_slider = ctk.CTkSlider(row, from_=1, to=45, command=self._max_boundary_angle_changed)
+            self.max_boundary_angle_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+            ctk.CTkLabel(row, textvariable=self.max_boundary_angle_var, width=46, anchor="e", text_color="#dbe7f2").grid(
+                row=0, column=2, sticky="e"
+            )
+        if visibility["taper_height"]:
             row = self._row("taper_height")
             self.taper_height_slider = ctk.CTkSlider(row, from_=0, to=100, command=self._taper_height_changed)
             self.taper_height_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
@@ -181,10 +208,14 @@ class OptionPanel(ctk.CTkFrame):
             )
 
         self._section_label("section_overlay")
-        self._switch_row("selected_edges", self.show_selected_var)
-        self._switch_row("fit_line", self.show_fit_var)
-        self._switch_row("ROI", self.show_roi_var)
-        self._switch_row("labels", self.show_labels_var)
+        if visibility["selected_edges"]:
+            self._switch_row("selected_edges", self.show_selected_var)
+        if visibility["fit_line"]:
+            self._switch_row("fit_line", self.show_fit_var)
+        if visibility["ROI"]:
+            self._switch_row("ROI", self.show_roi_var)
+        if visibility["labels"]:
+            self._switch_row("labels", self.show_labels_var)
 
         self._section_label("section_candidate_summary")
         self._metric_row("raw_edge_count", self.raw_edge_count_var)
