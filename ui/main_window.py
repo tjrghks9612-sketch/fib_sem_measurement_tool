@@ -59,6 +59,7 @@ class MainWindow(ctk.CTk):
         self.scale_bar_bboxes: Dict[str, tuple] = {}
         self._profile_image_path = ""
         self._last_option_signature = None
+        self._last_measured_settings: Optional[MeasurementSettings] = None
         self.image_cache = OrderedDict()
         self.image_cache_limit = 8
         self.render_cache = OrderedDict()
@@ -118,6 +119,8 @@ class MainWindow(ctk.CTk):
             main,
             on_select_image=self.select_image,
             on_selection_changed=lambda: None,
+            on_delete_selected=self.delete_selected_images,
+            on_measure_selected=self.measure_selected_images,
             language=self.language,
         )
         self.thumbnail_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
@@ -237,6 +240,7 @@ class MainWindow(ctk.CTk):
         self.thumbnail_overlay_cache.clear()
         self._profile_image_path = ""
         self._last_option_signature = None
+        self._last_measured_settings = None
         self.current_file_var.set(t(self.language, "current_file_none"))
         self.viewer.clear()
         self.profile_graph.set_image(None)
@@ -250,6 +254,50 @@ class MainWindow(ctk.CTk):
         self.option_panel.set_candidate_summary(None, self.global_settings)
         self.refresh_result_table()
         self.set_status(t(self.language, "initial_status"))
+
+    def delete_selected_images(self) -> None:
+        selected_indices = [index for index, item in enumerate(self.image_items) if item.selected]
+        if not selected_indices:
+            self.set_status(t(self.language, "no_selected_images"))
+            return
+
+        self._cancel_auto_measure()
+        selected_set = set(selected_indices)
+        removed_paths = {self.image_items[index].image_path for index in selected_indices}
+        current_removed = self.current_index in selected_set
+        removed_before_current = sum(1 for index in selected_indices if index < self.current_index)
+        previous_index = self.current_index
+
+        self.image_items = [item for index, item in enumerate(self.image_items) if index not in selected_set]
+        for path in removed_paths:
+            self.image_cache.pop(path, None)
+            self.scale_bar_bboxes.pop(path, None)
+        self.render_cache.clear()
+        self.thumbnail_overlay_cache.clear()
+        self._profile_image_path = ""
+        self._last_option_signature = None
+
+        if not self.image_items:
+            self.current_index = -1
+            self.current_image = None
+            self.current_image_path = ""
+            self._last_measured_settings = None
+            self.current_file_var.set(t(self.language, "current_file_none"))
+            self.viewer.clear()
+            self.profile_graph.set_image(None)
+            self.option_panel.set_settings(self.global_settings)
+            self.option_panel.set_candidate_summary(None, self.global_settings)
+        else:
+            if current_removed:
+                self.current_index = min(previous_index, len(self.image_items) - 1)
+                self.current_image_path = ""
+                self.load_current_image()
+            else:
+                self.current_index = max(0, previous_index - removed_before_current)
+                self.render_current_image()
+        self.refresh_thumbnail_panel()
+        self.refresh_result_table()
+        self.set_status(t(self.language, "selected_images_deleted").format(count=len(selected_indices)))
 
     def resolve_settings_for_item(self, item: ImageItem) -> MeasurementSettings:
         return resolve_effective_settings(item, self.global_settings)
@@ -265,8 +313,10 @@ class MainWindow(ctk.CTk):
         if index == self.current_index and self.current_image is not None:
             return
         self._cancel_auto_measure()
+        self._remember_current_measured_settings()
         previous_index = self.current_index
         self.current_index = index
+        self._apply_last_measured_settings_to_unmeasured_current()
         self.load_current_image()
         if previous_index != self.current_index:
             self.thumbnail_panel.set_current_index(self.current_index)
@@ -308,7 +358,26 @@ class MainWindow(ctk.CTk):
             self.current_image = self.load_image_cached(item.image_path)
             self.current_image_path = item.image_path
             self._last_option_signature = None
+        self._apply_last_measured_settings_to_unmeasured_current()
         self.render_current_image()
+
+    def _remember_current_measured_settings(self) -> None:
+        item = self.current_item()
+        if item is None or item.result is None:
+            return
+        self._last_measured_settings = self.resolve_settings_for_item(item).clone()
+
+    def _apply_last_measured_settings_to_unmeasured_current(self) -> None:
+        item = self.current_item()
+        if item is None or item.result is not None or item.settings is not None or self._last_measured_settings is None:
+            return
+        settings = self._last_measured_settings.clone()
+        if settings.roi is not None:
+            settings.roi = normalize_roi(settings.roi, item.image_size)
+        settings.roi_source_image = item.file_name
+        settings.settings_source = "image_specific"
+        item.settings = settings
+        self._last_option_signature = None
 
     def render_current_image(self, update_option_settings: bool = True) -> None:
         item = self.current_item()
@@ -682,6 +751,8 @@ class MainWindow(ctk.CTk):
         item = self.current_item()
         if scope == "all":
             return list(self.image_items)
+        if scope == "selected":
+            return [item for item in self.image_items if item.selected]
         return [item] if item else []
 
     def _apply_current_settings_to_targets(self, targets: List[ImageItem]) -> int:
@@ -738,10 +809,15 @@ class MainWindow(ctk.CTk):
         scope = force_scope or "current"
         targets = self._targets_for_scope(scope)
         if not targets:
+            if scope == "selected":
+                self.set_status(t(self.language, "no_selected_images"))
             return
         applied_roi_count = 0
-        if scope == "all":
+        if scope in {"all", "selected"}:
             applied_roi_count = self._apply_current_settings_to_targets(targets)
+            if applied_roi_count == 0:
+                self.set_status(t(self.language, "roi_missing"))
+                return
         failures = 0
         for idx, item in enumerate(targets, start=1):
             self.set_status(t(self.language, "measuring").format(index=idx, total=len(targets), file_name=item.file_name))
@@ -750,12 +826,16 @@ class MainWindow(ctk.CTk):
             item.result = run_measurement(image, settings)
             if item.result.status == "Fail":
                 failures += 1
+        self._remember_current_measured_settings()
         self.load_current_image()
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
         roi_message = t(self.language, "roi_applied_count").format(count=applied_roi_count) if applied_roi_count else ""
         failure_message = t(self.language, "failures_count").format(count=failures) if failures else ""
         self.set_status(t(self.language, "measurement_complete").format(count=len(targets)) + roi_message + failure_message)
+
+    def measure_selected_images(self) -> None:
+        self.measure_scope("selected")
 
     def export_csv(self) -> None:
         if not self.image_items:

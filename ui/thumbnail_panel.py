@@ -26,12 +26,16 @@ class ThumbnailPanel(ctk.CTkFrame):
         master,
         on_select_image: Callable[[int], None],
         on_selection_changed: Callable[[], None],
+        on_delete_selected: Callable[[], None],
+        on_measure_selected: Callable[[], None],
         language: str = "ko",
         **kwargs,
     ):
         super().__init__(master, fg_color="#0d1721", border_color="#223242", border_width=1, corner_radius=6, **kwargs)
         self.on_select_image = on_select_image
         self.on_selection_changed = on_selection_changed
+        self.on_delete_selected = on_delete_selected
+        self.on_measure_selected = on_measure_selected
         self.language = language
         self.items: List[ImageItem] = []
         self.current_index = -1
@@ -78,13 +82,38 @@ class ThumbnailPanel(ctk.CTkFrame):
 
         footer = ctk.CTkFrame(self, fg_color="#0a121b")
         footer.pack(fill="x", padx=10, pady=(0, 10))
-        self.select_all_button = ctk.CTkButton(footer, text=t(self.language, "select_all"), width=90, fg_color="#142234", command=self.select_all_visible)
-        self.select_all_button.pack(side="left", padx=6, pady=6)
-        self.clear_button = ctk.CTkButton(footer, text=t(self.language, "clear"), width=90, fg_color="#142234", command=self.clear_selection)
-        self.clear_button.pack(side="left", padx=4, pady=6)
-        self.selection_label = ctk.CTkLabel(footer, text=t(self.language, "selection"))
+        footer_actions = ctk.CTkFrame(footer, fg_color="transparent")
+        footer_actions.pack(fill="x", padx=6, pady=(6, 3))
+        footer_batch = ctk.CTkFrame(footer, fg_color="transparent")
+        footer_batch.pack(fill="x", padx=6, pady=(3, 6))
+        self.select_all_button = ctk.CTkButton(
+            footer_actions,
+            text=t(self.language, "select_all"),
+            width=90,
+            fg_color="#142234",
+            command=self.select_all_visible,
+        )
+        self.select_all_button.pack(side="left", padx=(0, 4))
+        self.clear_button = ctk.CTkButton(footer_actions, text=t(self.language, "clear"), width=90, fg_color="#142234", command=self.clear_selection)
+        self.clear_button.pack(side="left", padx=4)
+        self.selection_label = ctk.CTkLabel(footer_actions, text=t(self.language, "selection"))
         self.selection_label.pack(side="left", padx=(14, 2))
-        ctk.CTkLabel(footer, textvariable=self.selection_var, text_color="#48aaff").pack(side="left")
+        ctk.CTkLabel(footer_actions, textvariable=self.selection_var, text_color="#48aaff").pack(side="left")
+        self.delete_selected_button = ctk.CTkButton(
+            footer_batch,
+            text=t(self.language, "delete_selected_images"),
+            width=128,
+            fg_color="#462032",
+            command=self.on_delete_selected,
+        )
+        self.delete_selected_button.pack(side="left", padx=(0, 4))
+        self.measure_selected_button = ctk.CTkButton(
+            footer_batch,
+            text=t(self.language, "measure_selected"),
+            width=128,
+            command=self.on_measure_selected,
+        )
+        self.measure_selected_button.pack(side="left", padx=4)
 
     def _type_filter_values(self) -> list[str]:
         return [t(self.language, "all_types")] + [measurement_label(self.language, key) for key in MEASUREMENT_KEYS]
@@ -244,6 +273,8 @@ class ThumbnailPanel(ctk.CTkFrame):
         self.header_label.configure(text=t(self.language, "thumb_header"))
         self.select_all_button.configure(text=t(self.language, "select_all"))
         self.clear_button.configure(text=t(self.language, "clear"))
+        self.delete_selected_button.configure(text=t(self.language, "delete_selected_images"))
+        self.measure_selected_button.configure(text=t(self.language, "measure_selected"))
         self.selection_label.configure(text=t(self.language, "selection"))
         self.type_menu.configure(values=self._type_filter_values())
         self.status_menu.configure(values=self._status_filter_values())
