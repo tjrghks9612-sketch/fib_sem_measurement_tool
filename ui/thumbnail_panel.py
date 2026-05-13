@@ -16,6 +16,7 @@ MEASUREMENT_KEYS = (
     "distance_horizontal",
     "distance_vertical",
     "distance_both",
+    "hole_cd",
 )
 STATUS_KEYS = ("OK", "Check", "Review Needed", "Fail", "Not measured")
 

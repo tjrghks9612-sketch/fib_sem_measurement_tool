@@ -303,6 +303,23 @@ def _draw_ellipse_cd(image: np.ndarray, result: EllipseCDResult, settings: Measu
             _label(image, f"{t(language, 'ellipse_cd_vertical')} {_format_value(result.vertical_diameter_px, settings)}", (p2[0] + 8, p2[1] - 8), THK_COLOR, scale=0.44)
 
 
+def _draw_hole_cd(image: np.ndarray, result, settings: MeasurementSettings) -> None:
+    if not result.contour_points:
+        return
+    contour = np.asarray(result.contour_points, dtype=np.int32).reshape(-1, 1, 2)
+    cv2.polylines(image, [contour], True, (80, 205, 255), 2, cv2.LINE_AA)
+    points = np.asarray(result.contour_points, dtype=np.float32)
+    x_min, y_min = np.min(points, axis=0)
+    x_max, y_max = np.max(points, axis=0)
+    cy = int(round((y_min + y_max) * 0.5))
+    cx = int(round((x_min + x_max) * 0.5))
+    cv2.line(image, (int(round(x_min)), cy), (int(round(x_max)), cy), (255, 220, 75), 2, cv2.LINE_AA)
+    cv2.line(image, (cx, int(round(y_min))), (cx, int(round(y_max))), (80, 245, 120), 2, cv2.LINE_AA)
+    if settings.show_labels:
+        label = f"Hole {_format_value(result.horizontal_px, settings)} x {_format_value(result.vertical_px, settings)}"
+        _label(image, label, (int(round(x_max)) + 8, cy - 8), (80, 205, 255), scale=0.48)
+
+
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings, language: str) -> None:
     if not settings.show_labels:
         return
@@ -313,6 +330,8 @@ def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], setting
         rows.append((t(language, "fit_line"), TAPER_LEFT_COLOR))
     if result and result.ellipse_cd:
         rows.append((measurement_label(language, "ellipse_cd"), ELLIPSE_COLOR))
+    if result and result.hole_cd:
+        rows.append((measurement_label(language, "hole_cd"), (80, 205, 255)))
     if settings.roi is not None and _taper_sides(settings):
         rows.append((t(language, "taper_height"), TAPER_HEIGHT_COLOR))
 
@@ -393,6 +412,8 @@ def draw_overlay(
                 _draw_distance(canvas, result.vertical_thk, settings, THK_COLOR, "THK")
             if result.ellipse_cd:
                 _draw_ellipse_cd(canvas, result.ellipse_cd, settings, language)
+            if result.hole_cd:
+                _draw_hole_cd(canvas, result.hole_cd, settings)
         if result.left_taper:
             _draw_taper(canvas, result.left_taper, TAPER_LEFT_COLOR, settings, language)
         if result.right_taper:

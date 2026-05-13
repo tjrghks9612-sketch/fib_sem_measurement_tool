@@ -12,6 +12,8 @@ from fib_sem_measurement_tool.ui.i18n import (
     distance_method_label,
     edge_scan_mode_key,
     edge_scan_mode_label,
+    hole_target_key,
+    hole_target_label,
     measurement_key,
     measurement_label,
     settings_source_label,
@@ -27,29 +29,33 @@ MEASUREMENT_KEYS = (
     "distance_horizontal",
     "distance_vertical",
     "distance_both",
+    "hole_cd",
 )
 DISTANCE_METHOD_KEYS = ("mean", "max", "min")
 EDGE_SCAN_MODE_KEYS = ("auto", "outside_to_center", "center_to_outside")
+HOLE_TARGET_KEYS = ("inner", "outer")
 
 
 def option_visibility_for_measurement_type(measurement_type: str, boundary_angle_filter_enabled: bool = False) -> dict[str, bool]:
     is_distance = measurement_type in {"distance_horizontal", "distance_vertical", "distance_both"}
     is_taper = measurement_type in {"taper_single", "taper_double"}
+    is_hole = measurement_type == "hole_cd"
     return {
+        "hole_target": is_hole,
         "taper_side": measurement_type == "taper_single",
         "representative_value": is_distance,
         "edge_scan_start": is_distance or is_taper,
-        "minimum_delta": is_distance or is_taper,
+        "minimum_delta": is_distance or is_taper or is_hole,
         "normalize_signal": is_distance,
         "denoise_signal": is_distance,
         "boundary_angle_filter": is_distance,
         "max_boundary_angle": is_distance and boundary_angle_filter_enabled,
         "taper_height": is_taper,
-        "selected_edges": is_distance or is_taper,
+        "selected_edges": is_distance or is_taper or is_hole,
         "fit_line": is_taper,
-        "ROI": is_distance or is_taper,
-        "labels": is_distance or is_taper,
-        "calibration": is_distance,
+        "ROI": is_distance or is_taper or is_hole,
+        "labels": is_distance or is_taper or is_hole,
+        "calibration": is_distance or is_hole,
     }
 
 
@@ -75,6 +81,7 @@ class OptionPanel(ctk.CTkFrame):
         self._translatable_widgets = []
 
         self.measurement_type_var = tk.StringVar(value=measurement_label(self.language, "distance_both"))
+        self.hole_target_var = tk.StringVar(value=hole_target_label(self.language, "inner"))
         self.taper_side_var = tk.StringVar(value="left")
         self.distance_method_var = tk.StringVar(value=distance_method_label(self.language, "mean"))
         self.edge_scan_mode_var = tk.StringVar(value=edge_scan_mode_label(self.language, "auto"))
@@ -145,6 +152,7 @@ class OptionPanel(ctk.CTkFrame):
         self.taper_left_radio = None
         self.taper_right_radio = None
         self.distance_method_menu = None
+        self.hole_target_menu = None
         self.edge_scan_mode_menu = None
         self.max_boundary_angle_slider = None
         self.taper_height_slider = None
@@ -164,6 +172,13 @@ class OptionPanel(ctk.CTkFrame):
         )
         self._value_row("ROI", self.roi_var)
 
+        if visibility["hole_target"]:
+            self.hole_target_menu = self._combo_row(
+                "hole_target",
+                self.hole_target_var,
+                [hole_target_label(self.language, key) for key in HOLE_TARGET_KEYS],
+                lambda _v: self._changed(),
+            )
         if visibility["taper_side"]:
             self._radio_row(
                 "taper_side",
@@ -359,6 +374,7 @@ class OptionPanel(ctk.CTkFrame):
     def get_settings(self, base: Optional[MeasurementSettings] = None) -> MeasurementSettings:
         settings = base.clone() if base is not None else MeasurementSettings()
         settings.measurement_type = measurement_key(self.measurement_type_var.get(), "distance_both")
+        settings.hole_target = hole_target_key(self.hole_target_var.get(), "inner")
         settings.taper_side = self.taper_side_var.get()
         settings.distance_method = distance_method_key(self.distance_method_var.get(), "mean")
         settings.edge_scan_mode = edge_scan_mode_key(self.edge_scan_mode_var.get(), "auto")
@@ -386,6 +402,7 @@ class OptionPanel(ctk.CTkFrame):
             settings = settings.clone()
             settings.measurement_type = "distance_both"
         self.measurement_type_var.set(measurement_label(self.language, settings.measurement_type))
+        self.hole_target_var.set(hole_target_label(self.language, getattr(settings, "hole_target", "inner")))
         self.taper_side_var.set(settings.taper_side)
         self.distance_method_var.set(distance_method_label(self.language, settings.distance_method))
         self.edge_scan_mode_var.set(edge_scan_mode_label(self.language, getattr(settings, "edge_scan_mode", "auto")))
@@ -460,6 +477,8 @@ class OptionPanel(ctk.CTkFrame):
             return f"CD {result.horizontal_cd.selected_px * scale:.4g} {unit}"
         if result.vertical_thk and result.vertical_thk.selected_px is not None:
             return f"THK {result.vertical_thk.selected_px * scale:.4g} {unit}"
+        if result.hole_cd and result.hole_cd.horizontal_px is not None:
+            return f"Hole CD {result.hole_cd.horizontal_px * scale:.4g} x {result.hole_cd.vertical_px * scale:.4g} {unit}"
         if result.avg_taper_angle is not None:
             return f"{t(self.language, 'average_taper')} {result.avg_taper_angle:.2f} deg"
         if result.left_taper and result.left_taper.angle_horizontal is not None:
@@ -503,6 +522,8 @@ class OptionPanel(ctk.CTkFrame):
             self.measurement_type_menu.configure(values=[measurement_label(self.language, key) for key in MEASUREMENT_KEYS])
             if self.distance_method_menu is not None:
                 self.distance_method_menu.configure(values=[distance_method_label(self.language, key) for key in DISTANCE_METHOD_KEYS])
+            if self.hole_target_menu is not None:
+                self.hole_target_menu.configure(values=[hole_target_label(self.language, key) for key in HOLE_TARGET_KEYS])
             if self.edge_scan_mode_menu is not None:
                 self.edge_scan_mode_menu.configure(values=[edge_scan_mode_label(self.language, key) for key in EDGE_SCAN_MODE_KEYS])
             self.set_settings(current_settings)

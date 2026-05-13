@@ -99,6 +99,32 @@ CSV_COLUMNS = [
     "right_taper_scanline_coverage",
     "right_taper_selected_point_count",
     "right_taper_fit_point_count",
+    "hole_target",
+    "hole_cd_horizontal_px",
+    "hole_cd_vertical_px",
+    "hole_cd_min_feret_px",
+    "hole_cd_max_feret_px",
+    "hole_cd_equivalent_diameter_px",
+    "hole_cd_area_px",
+    "hole_cd_perimeter_px",
+    "hole_cd_horizontal",
+    "hole_cd_vertical",
+    "hole_cd_min_feret",
+    "hole_cd_max_feret",
+    "hole_cd_equivalent_diameter",
+    "hole_cd_coverage",
+    "hole_cd_mean_radius",
+    "hole_cd_radius_std",
+    "hole_cd_mean_strength",
+    "hole_cd_smoothness",
+    "hole_cd_confidence",
+    "hole_cd_status",
+    "hole_cd_warning_message",
+    "hole_cd_ellipse_major_px",
+    "hole_cd_ellipse_minor_px",
+    "hole_cd_ellipse_angle_deg",
+    "hole_cd_ellipse_fit_error",
+    "hole_cd_ellipse_aspect_ratio",
 ]
 
 
@@ -156,6 +182,38 @@ def _taper_values(side: str, row: Dict[str, object], result: Optional[TaperSideR
     row[f"{side}_taper_fit_point_count"] = result.fit_point_count
 
 
+def _hole_cd_values(row: Dict[str, object], result, settings: MeasurementSettings) -> None:
+    if result is None:
+        return
+    scaled = result.scaled(settings.calibration.px_to_real)
+    row["hole_target"] = result.target
+    row["hole_cd_horizontal_px"] = result.horizontal_px
+    row["hole_cd_vertical_px"] = result.vertical_px
+    row["hole_cd_min_feret_px"] = result.min_feret_px
+    row["hole_cd_max_feret_px"] = result.max_feret_px
+    row["hole_cd_equivalent_diameter_px"] = result.equivalent_diameter_px
+    row["hole_cd_area_px"] = result.area_px
+    row["hole_cd_perimeter_px"] = result.perimeter_px
+    row["hole_cd_horizontal"] = scaled["horizontal"]
+    row["hole_cd_vertical"] = scaled["vertical"]
+    row["hole_cd_min_feret"] = scaled["min_feret"]
+    row["hole_cd_max_feret"] = scaled["max_feret"]
+    row["hole_cd_equivalent_diameter"] = scaled["equivalent_diameter"]
+    row["hole_cd_coverage"] = result.coverage
+    row["hole_cd_mean_radius"] = result.mean_radius
+    row["hole_cd_radius_std"] = result.radius_std
+    row["hole_cd_mean_strength"] = result.mean_strength
+    row["hole_cd_smoothness"] = result.smoothness
+    row["hole_cd_confidence"] = result.confidence
+    row["hole_cd_status"] = result.status
+    row["hole_cd_warning_message"] = result.warning_message
+    row["hole_cd_ellipse_major_px"] = result.ellipse_major_px
+    row["hole_cd_ellipse_minor_px"] = result.ellipse_minor_px
+    row["hole_cd_ellipse_angle_deg"] = result.ellipse_angle_deg
+    row["hole_cd_ellipse_fit_error"] = result.ellipse_fit_error
+    row["hole_cd_ellipse_aspect_ratio"] = result.ellipse_aspect_ratio
+
+
 def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str, object]:
     result: Optional[MeasurementResult] = item.result
     roi = settings.roi or ("", "", "", "")
@@ -192,6 +250,7 @@ def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str,
     _taper_values("right", row, result.right_taper)
     _distance_values("horizontal_cd", row, result.horizontal_cd, settings)
     _distance_values("vertical_thk", row, result.vertical_thk, settings)
+    _hole_cd_values(row, result.hole_cd, settings)
     row["overall_confidence"] = result.overall_confidence
     row["status"] = result.status
     row["warning_message"] = result.warning_message

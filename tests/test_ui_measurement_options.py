@@ -11,6 +11,8 @@ class UiMeasurementOptionsTest(unittest.TestCase):
     def test_ellipse_cd_mode_is_not_exposed_in_ui_options(self) -> None:
         self.assertNotIn("ellipse_cd", OPTION_MEASUREMENT_KEYS)
         self.assertNotIn("ellipse_cd", THUMBNAIL_MEASUREMENT_KEYS)
+        self.assertIn("hole_cd", OPTION_MEASUREMENT_KEYS)
+        self.assertIn("hole_cd", THUMBNAIL_MEASUREMENT_KEYS)
         for labels in MEASUREMENT_LABELS.values():
             self.assertNotIn("ellipse_cd", labels)
 
@@ -53,6 +55,16 @@ class UiMeasurementOptionsTest(unittest.TestCase):
         self.assertFalse(hidden["max_boundary_angle"])
         self.assertTrue(visible["max_boundary_angle"])
         self.assertFalse(taper["max_boundary_angle"])
+
+    def test_hole_cd_only_shows_hole_options(self) -> None:
+        visibility = option_visibility_for_measurement_type("hole_cd")
+
+        self.assertTrue(visibility["hole_target"])
+        self.assertTrue(visibility["minimum_delta"])
+        self.assertTrue(visibility["calibration"])
+        self.assertFalse(visibility["representative_value"])
+        self.assertFalse(visibility["edge_scan_start"])
+        self.assertFalse(visibility["taper_height"])
 
 
 if __name__ == "__main__":

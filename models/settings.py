@@ -11,6 +11,7 @@ MEASUREMENT_TYPES = {
     "distance_horizontal": "가로 CD",
     "distance_vertical": "세로 THK",
     "distance_both": "가로 + 세로",
+    "hole_cd": "Hole CD 측정",
 }
 
 MEASUREMENT_TYPE_BY_LABEL = {label: key for key, label in MEASUREMENT_TYPES.items()}
@@ -61,6 +62,7 @@ class CalibrationSettings:
 class MeasurementSettings:
     measurement_type: str = "distance_both"
     measure_direction: str = "both"
+    hole_target: str = "inner"
     taper_side: str = "left"
     distance_method: str = "mean"
     edge_scan_mode: str = "auto"

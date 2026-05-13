@@ -5,7 +5,6 @@ from typing import Sequence, Tuple
 
 import numpy as np
 
-from fib_sem_measurement_tool.core.measurement_runner import calculate_overall_coverage
 from fib_sem_measurement_tool.models.result import (
     DistanceResult,
     MeasurementResult,
@@ -13,6 +12,7 @@ from fib_sem_measurement_tool.models.result import (
     PairCandidate,
     RawEdgeCandidate,
     TaperSideResult,
+    HoleCDResult,
 )
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -177,10 +177,47 @@ def make_manual_measurement(points: Sequence[Point], settings: MeasurementSettin
             result.avg_taper_angle = float(np.mean(angles))
         if len(angles) == 2:
             result.taper_angle_diff = float(abs(angles[0] - angles[1]))
+    elif measurement_type == "hole_cd":
+        p1, p2 = ordered[0], ordered[1]
+        horizontal = abs(float(p2[0]) - float(p1[0]))
+        vertical = abs(float(p2[1]) - float(p1[1]))
+        diameter = float(max(horizontal, vertical))
+        cx = (float(p1[0]) + float(p2[0])) * 0.5
+        cy = (float(p1[1]) + float(p2[1])) * 0.5
+        rx = max(horizontal * 0.5, 1.0)
+        ry = max(vertical * 0.5, 1.0)
+        contour = [
+            (cx + rx * math.cos(theta), cy + ry * math.sin(theta))
+            for theta in np.linspace(0.0, 2.0 * math.pi, 180, endpoint=False)
+        ]
+        area = math.pi * rx * ry
+        perimeter = math.pi * (3 * (rx + ry) - math.sqrt((3 * rx + ry) * (rx + 3 * ry)))
+        result.hole_cd = HoleCDResult(
+            target=getattr(settings, "hole_target", "inner"),
+            horizontal_px=horizontal,
+            vertical_px=vertical,
+            min_feret_px=min(horizontal, vertical),
+            max_feret_px=diameter,
+            equivalent_diameter_px=math.sqrt(4.0 * area / math.pi),
+            area_px=area,
+            perimeter_px=perimeter,
+            coverage=1.0,
+            mean_radius=(rx + ry) * 0.5,
+            radius_std=abs(rx - ry) * 0.5,
+            mean_strength=1.0,
+            smoothness=0.0,
+            continuity=1.0,
+            confidence=100.0,
+            status=MeasurementStatus.OK.value,
+            contour_points=contour,
+            center=(cx, cy),
+        )
     else:
         result.status = MeasurementStatus.FAIL.value
         result.overall_confidence = 0.0
         result.warning_message = "Unsupported manual measurement type"
+
+    from fib_sem_measurement_tool.core.measurement_runner import calculate_overall_coverage
 
     calculate_overall_coverage(result)
     result.measurement_source = "manual"

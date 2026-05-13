@@ -18,6 +18,7 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "가로 CD",
         "distance_vertical": "세로 THK",
         "distance_both": "가로 + 세로",
+        "hole_cd": "Hole CD 측정",
     },
     "en": {
         "taper_single": "Single taper",
@@ -25,6 +26,7 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "Horizontal CD",
         "distance_vertical": "Vertical THK",
         "distance_both": "Horizontal + Vertical",
+        "hole_cd": "Hole CD",
     },
     "vi": {
         "taper_single": "Taper một bên",
@@ -32,6 +34,7 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "CD ngang",
         "distance_vertical": "THK dọc",
         "distance_both": "Ngang + Dọc",
+        "hole_cd": "Hole CD",
     },
 }
 
@@ -57,6 +60,12 @@ TAPER_SIDE_LABELS: Dict[str, Dict[str, str]] = {
     "ko": {"left": "좌측", "right": "우측"},
     "en": {"left": "Left", "right": "Right"},
     "vi": {"left": "Trái", "right": "Phải"},
+}
+
+HOLE_TARGET_LABELS: Dict[str, Dict[str, str]] = {
+    "ko": {"inner": "내측 경계", "outer": "외측 경계"},
+    "en": {"inner": "Inner boundary", "outer": "Outer boundary"},
+    "vi": {"inner": "Biên trong", "outer": "Biên ngoài"},
 }
 
 STATUS_LABELS: Dict[str, Dict[str, str]] = {
@@ -89,6 +98,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "option_header": "검사 설정",
         "section_measurement": "측정 설정",
         "measurement_mode": "측정 모드",
+        "hole_target": "Hole 경계",
         "taper_side": "테이퍼 측",
         "representative_value": "대표값",
         "edge_scan_start": "탐색 시작",
@@ -203,6 +213,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "option_header": "Inspection Settings",
         "section_measurement": "Measurement",
         "measurement_mode": "Mode",
+        "hole_target": "Hole Boundary",
         "taper_side": "Taper Side",
         "representative_value": "Representative",
         "edge_scan_start": "Scan Start",
@@ -317,6 +328,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "option_header": "Cài đặt kiểm tra",
         "section_measurement": "Đo lường",
         "measurement_mode": "Chế độ",
+        "hole_target": "Biên hole",
         "taper_side": "Phía taper",
         "representative_value": "Giá trị đại diện",
         "edge_scan_start": "Bắt đầu quét",
@@ -481,6 +493,14 @@ def profile_mode_key(label: str, default: str = "both") -> str:
 
 def taper_side_label(language: str, key: str) -> str:
     return _label(TAPER_SIDE_LABELS, language, key)
+
+
+def hole_target_label(language: str, key: str) -> str:
+    return _label(HOLE_TARGET_LABELS, language, key)
+
+
+def hole_target_key(label: str, default: str = "inner") -> str:
+    return _key_from_label(HOLE_TARGET_LABELS, label, default)
 
 
 def status_label(language: str, status: str) -> str:
