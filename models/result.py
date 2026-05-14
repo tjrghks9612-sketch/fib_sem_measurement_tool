@@ -176,6 +176,106 @@ class EllipseCDResult:
 
 
 @dataclass
+class HoleCDResult:
+    target: str = "inner"
+    horizontal_px: Optional[float] = None
+    vertical_px: Optional[float] = None
+    min_feret_px: Optional[float] = None
+    max_feret_px: Optional[float] = None
+    equivalent_diameter_px: Optional[float] = None
+    area_px: Optional[float] = None
+    perimeter_px: Optional[float] = None
+    coverage: float = 0.0
+    mean_radius: Optional[float] = None
+    radius_std: Optional[float] = None
+    mean_strength: Optional[float] = None
+    smoothness: Optional[float] = None
+    continuity: float = 0.0
+    gap_count: int = 0
+    max_gap: int = 0
+    confidence: float = 0.0
+    status: str = "Fail"
+    warning_message: str = ""
+    contour_points: List[Tuple[float, float]] = field(default_factory=list)
+    center: Optional[Tuple[float, float]] = None
+    ellipse_major_px: Optional[float] = None
+    ellipse_minor_px: Optional[float] = None
+    ellipse_angle_deg: Optional[float] = None
+    ellipse_fit_error: Optional[float] = None
+    ellipse_aspect_ratio: Optional[float] = None
+
+    def scaled(self, px_to_real: float) -> Dict[str, Optional[float]]:
+        if not px_to_real:
+            px_to_real = 1.0
+        return {
+            "horizontal": self.horizontal_px * px_to_real if self.horizontal_px is not None else None,
+            "vertical": self.vertical_px * px_to_real if self.vertical_px is not None else None,
+            "min_feret": self.min_feret_px * px_to_real if self.min_feret_px is not None else None,
+            "max_feret": self.max_feret_px * px_to_real if self.max_feret_px is not None else None,
+            "equivalent_diameter": self.equivalent_diameter_px * px_to_real if self.equivalent_diameter_px is not None else None,
+        }
+
+
+@dataclass
+class CraterResult:
+    cd_px: Optional[float] = None
+    cd: Optional[float] = None
+    thk_px: Optional[float] = None
+    thk: Optional[float] = None
+    thk_mean_px: Optional[float] = None
+    thk_max_px: Optional[float] = None
+    thk_min_px: Optional[float] = None
+    thk_median_px: Optional[float] = None
+    left_foot_x: Optional[float] = None
+    left_foot_y: Optional[float] = None
+    right_foot_x: Optional[float] = None
+    right_foot_y: Optional[float] = None
+    baseline_y_left: Optional[float] = None
+    baseline_y_right: Optional[float] = None
+    baseline_slope: Optional[float] = None
+    baseline_intercept: Optional[float] = None
+    baseline_confidence: float = 0.0
+    baseline_status: str = "Fail"
+    center_x: Optional[float] = None
+    top_y_at_center: Optional[float] = None
+    baseline_y_at_center: Optional[float] = None
+    top_profile_point_count: int = 0
+    top_profile_valid_count: int = 0
+    top_profile_coverage: float = 0.0
+    top_profile_smoothness: Optional[float] = None
+    top_profile_confidence: float = 0.0
+    top_profile_status: str = "Fail"
+    foot_confidence: float = 0.0
+    foot_status: str = "Fail"
+    cd_status: str = "Fail"
+    cd_confidence: float = 0.0
+    thk_status: str = "Fail"
+    thk_confidence: float = 0.0
+    left_taper_angle_horizontal: Optional[float] = None
+    right_taper_angle_horizontal: Optional[float] = None
+    left_taper_angle_vertical: Optional[float] = None
+    right_taper_angle_vertical: Optional[float] = None
+    avg_taper_angle: Optional[float] = None
+    taper_angle_diff: Optional[float] = None
+    left_taper_fit_error: Optional[float] = None
+    right_taper_fit_error: Optional[float] = None
+    left_taper_valid_count: int = 0
+    right_taper_valid_count: int = 0
+    left_taper_status: str = "Fail"
+    right_taper_status: str = "Fail"
+    confidence: float = 0.0
+    overall_confidence: float = 0.0
+    status: str = "Fail"
+    warning_message: str = ""
+    top_profile_points: List[Tuple[float, float]] = field(default_factory=list)
+    baseline_line: Optional[Tuple[float, float, float, float]] = None
+    cd_line: Optional[Tuple[float, float, float, float]] = None
+    thk_line: Optional[Tuple[float, float, float, float]] = None
+    left_taper_line: Optional[Tuple[float, float, float, float]] = None
+    right_taper_line: Optional[Tuple[float, float, float, float]] = None
+
+
+@dataclass
 class MeasurementResult:
     measurement_type: str
     horizontal_cd: Optional[DistanceResult] = None
@@ -183,6 +283,8 @@ class MeasurementResult:
     left_taper: Optional[TaperSideResult] = None
     right_taper: Optional[TaperSideResult] = None
     ellipse_cd: Optional[EllipseCDResult] = None
+    hole_cd: Optional[HoleCDResult] = None
+    crater: Optional[CraterResult] = None
     avg_taper_angle: Optional[float] = None
     taper_angle_diff: Optional[float] = None
     overall_confidence: float = 0.0
@@ -212,6 +314,16 @@ class MeasurementResult:
             chunks.append(f"Ellipse H {h_value:.3g} {unit}")
             if v_value is not None:
                 chunks.append(f"Ellipse V {v_value:.3g} {unit}")
+        if self.hole_cd and self.hole_cd.horizontal_px is not None:
+            h_value = self.hole_cd.horizontal_px * px_to_real
+            v_value = self.hole_cd.vertical_px * px_to_real if self.hole_cd.vertical_px is not None else None
+            chunks.append(f"Hole H {h_value:.3g} {unit}")
+            if v_value is not None:
+                chunks.append(f"Hole V {v_value:.3g} {unit}")
+        if self.crater and self.crater.cd_px is not None:
+            chunks.append(f"Crater CD {self.crater.cd_px * px_to_real:.3g} {unit}")
+            if self.crater.thk_px is not None:
+                chunks.append(f"THK {self.crater.thk_px * px_to_real:.3g} {unit}")
         status_label = {
             "OK": "정상",
             "Check": "확인",
@@ -236,4 +348,8 @@ class MeasurementResult:
         )
         if self.ellipse_cd is not None:
             count += self.ellipse_cd.valid_point_count
+        if self.hole_cd is not None:
+            count += len(self.hole_cd.contour_points)
+        if self.crater is not None:
+            count += len(self.crater.top_profile_points)
         return count

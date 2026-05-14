@@ -17,6 +17,7 @@ class ImageViewer(ctk.CTkFrame):
         on_roi_changed: Callable[[Tuple[int, int, int, int]], None],
         on_overlay_toggled: Callable[[bool], None],
         on_hover_profile: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
+        on_manual_points: Optional[Callable[[list[Tuple[int, int]]], None]] = None,
         language: str = "ko",
         **kwargs,
     ):
@@ -24,6 +25,7 @@ class ImageViewer(ctk.CTkFrame):
         self.on_roi_changed = on_roi_changed
         self.on_overlay_toggled = on_overlay_toggled
         self.on_hover_profile = on_hover_profile
+        self.on_manual_points = on_manual_points
         self.language = language
 
         self.title_var = tk.StringVar(value=t(self.language, "viewer_title"))
@@ -45,6 +47,9 @@ class ImageViewer(ctk.CTkFrame):
         self.draw_h = 0
         self.drag_start_canvas: Optional[Tuple[int, int]] = None
         self.drag_item: Optional[int] = None
+        self.manual_points: list[Tuple[int, int]] = []
+        self.manual_point_count = 2
+        self.manual_items: list[int] = []
         self._content_image_id = None
         self._last_render_state = None
         self._last_hover_xy = (None, None)
@@ -73,6 +78,22 @@ class ImageViewer(ctk.CTkFrame):
         controls.pack(fill="x", padx=12, pady=(0, 10))
         self.roi_button = ctk.CTkButton(controls, text="ROI", width=54, command=lambda: self.set_mode("roi"))
         self.roi_button.pack(side="left", padx=(8, 4), pady=8)
+        self.manual_button = ctk.CTkButton(
+            controls,
+            text=t(self.language, "manual_mode"),
+            width=76,
+            fg_color="#142234",
+            command=lambda: self.set_mode("manual"),
+        )
+        self.manual_button.pack(side="left", padx=4, pady=8)
+        self.manual_clear_button = ctk.CTkButton(
+            controls,
+            text=t(self.language, "manual_clear"),
+            width=64,
+            fg_color="#142234",
+            command=self.clear_manual_points,
+        )
+        self.manual_clear_button.pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="-", width=38, fg_color="#142234", command=self.zoom_out).pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="+", width=38, fg_color="#142234", command=self.zoom_in).pack(side="left", padx=4, pady=8)
         self.fit_button = ctk.CTkButton(controls, text=t(self.language, "fit"), width=54, fg_color="#142234", command=self.fit)
@@ -83,8 +104,19 @@ class ImageViewer(ctk.CTkFrame):
         self.overlay_switch.pack(side="right", padx=10, pady=8)
 
     def set_mode(self, mode: str) -> None:
-        self.mode_var.set("roi")
-        self.canvas.configure(cursor="crosshair")
+        clean_mode = "manual" if mode == "manual" else "roi"
+        self.mode_var.set(clean_mode)
+        self.canvas.configure(cursor="tcross" if clean_mode == "manual" else "crosshair")
+        self.roi_button.configure(fg_color="#1f6aa5" if clean_mode == "roi" else "#142234")
+        self.manual_button.configure(fg_color="#1f6aa5" if clean_mode == "manual" else "#142234")
+        self._update_manual_status()
+
+    def set_manual_point_count(self, count: int) -> None:
+        next_count = max(2, int(count))
+        if next_count == self.manual_point_count:
+            return
+        self.manual_point_count = next_count
+        self.clear_manual_points()
 
     def set_content(self, image_bgr, render_bgr, title: str, meta: str, status: str) -> None:
         image_id = (id(image_bgr), image_bgr.shape if image_bgr is not None else None)
@@ -105,6 +137,7 @@ class ImageViewer(ctk.CTkFrame):
         self._canvas_image_item = None
         self._last_render_state = None
         self._last_hover_xy = (None, None)
+        self.clear_manual_points()
         self.title_var.set(t(self.language, "viewer_title"))
         self.meta_var.set(t(self.language, "load_image_prompt"))
         self.status_var.set("")
@@ -163,6 +196,34 @@ class ImageViewer(ctk.CTkFrame):
             self.zoom_var.set(t(self.language, "fit"))
         else:
             self.zoom_var.set(f"{self.scale * 100:.0f}%")
+        self._redraw_manual_points()
+
+    def _update_manual_status(self) -> None:
+        if self.mode_var.get() == "manual":
+            self.status_var.set(t(self.language, "manual_points_status").format(count=len(self.manual_points), total=self.manual_point_count))
+
+    def clear_manual_points(self) -> None:
+        self.manual_points = []
+        for item in self.manual_items:
+            self.canvas.delete(item)
+        self.manual_items = []
+        self._update_manual_status()
+
+    def _image_to_canvas(self, point: Tuple[int, int]) -> Tuple[int, int]:
+        return int(round(self.offset_x + point[0] * self.scale)), int(round(self.offset_y + point[1] * self.scale))
+
+    def _redraw_manual_points(self) -> None:
+        for item in self.manual_items:
+            self.canvas.delete(item)
+        self.manual_items = []
+        if not self.manual_points:
+            return
+        canvas_points = [self._image_to_canvas(point) for point in self.manual_points]
+        if len(canvas_points) >= 2:
+            self.manual_items.append(self.canvas.create_line(*canvas_points, fill="#ffde59", width=2, dash=(5, 3)))
+        for idx, (x, y) in enumerate(canvas_points, start=1):
+            self.manual_items.append(self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline="#101820", fill="#ffde59", width=2))
+            self.manual_items.append(self.canvas.create_text(x + 10, y - 10, text=str(idx), fill="#fffbdf", anchor="w"))
 
     def _is_canvas_inside_image(self, x: int, y: int) -> bool:
         return (
@@ -199,6 +260,17 @@ class ImageViewer(ctk.CTkFrame):
 
     def _on_press(self, event) -> None:
         if self.image_bgr is None:
+            return
+        if self.mode_var.get() == "manual":
+            if not self._is_canvas_inside_image(event.x, event.y):
+                return
+            self.manual_points.append(self._canvas_to_image(event.x, event.y))
+            self._redraw_manual_points()
+            self._update_manual_status()
+            if len(self.manual_points) >= self.manual_point_count and self.on_manual_points is not None:
+                points = list(self.manual_points[: self.manual_point_count])
+                self.clear_manual_points()
+                self.on_manual_points(points)
             return
         self.drag_start_canvas = (event.x, event.y)
         if self.drag_item:
@@ -239,3 +311,6 @@ class ImageViewer(ctk.CTkFrame):
             self.meta_var.set(t(self.language, "load_image_prompt"))
         if self.fit_mode:
             self.zoom_var.set(t(self.language, "fit"))
+        self.manual_button.configure(text=t(self.language, "manual_mode"))
+        self.manual_clear_button.configure(text=t(self.language, "manual_clear"))
+        self._update_manual_status()

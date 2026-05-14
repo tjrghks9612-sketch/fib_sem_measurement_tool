@@ -5,8 +5,9 @@ import logging
 import numpy as np
 
 from fib_sem_measurement_tool.core.image_io import to_gray
+from fib_sem_measurement_tool.core.crater_measurement import measure_crater
+from fib_sem_measurement_tool.core.hole_cd_measurement import measure_hole_cd
 from fib_sem_measurement_tool.core.measurement_cd_thk import CDMeasurementEngine
-from fib_sem_measurement_tool.core.measurement_ellipse_cd import measure_ellipse_cd
 from fib_sem_measurement_tool.core.measurement_taper import measure_double_taper, measure_single_taper
 from fib_sem_measurement_tool.core.roi_utils import normalize_roi
 from fib_sem_measurement_tool.models.result import MeasurementResult, MeasurementStatus
@@ -57,7 +58,7 @@ def _fail_result(measurement_type: str, message: str) -> MeasurementResult:
 def calculate_overall_coverage(result: MeasurementResult) -> float:
     components = [
         item
-        for item in (result.horizontal_cd, result.vertical_thk, result.left_taper, result.right_taper, result.ellipse_cd)
+        for item in (result.horizontal_cd, result.vertical_thk, result.left_taper, result.right_taper, result.ellipse_cd, result.hole_cd, result.crater)
         if item is not None
     ]
     if not components:
@@ -101,12 +102,16 @@ def run_measurement(image: np.ndarray, settings: MeasurementSettings) -> Measure
         elif settings.measurement_type == "taper_single":
             result = measure_single_taper(gray, clean_roi, settings.taper_side, settings)
             result.measurement_type = settings.measurement_type
-        elif settings.measurement_type == "ellipse_cd":
-            result = measure_ellipse_cd(gray, clean_roi, settings)
+        elif settings.measurement_type == "hole_cd":
+            result = measure_hole_cd(gray, clean_roi, settings)
+            result.measurement_type = settings.measurement_type
+        elif settings.measurement_type == "crater":
+            result = measure_crater(gray, clean_roi, settings)
             result.measurement_type = settings.measurement_type
         else:
             raise UnsupportedMeasurementTypeError("Unsupported measurement type")
-        calculate_overall_coverage(result)
+        if result.hole_cd is None and result.crater is None:
+            calculate_overall_coverage(result)
         return result
     except MeasurementRoiError as exc:
         logger.info("measurement_failed type=roi_error message=%s context=%s", str(exc), context)

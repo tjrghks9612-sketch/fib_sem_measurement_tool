@@ -114,7 +114,7 @@ class GrayscaleLineScanTest(unittest.TestCase):
         self.assertAlmostEqual(lower_y, 139.0)
         self.assertAlmostEqual(upper_y, 20.0)
 
-    def test_taper_height_percentage_does_not_move_fit_line(self) -> None:
+    def test_taper_height_percentage_selects_target_local_fit_window(self) -> None:
         settings = make_settings()
         settings.measurement_type = "taper_single"
         image = np.full((160, 220), 20, dtype=np.uint8)
@@ -130,8 +130,13 @@ class GrayscaleLineScanTest(unittest.TestCase):
 
         self.assertIsNotNone(lower_result.left_taper.fit_line)
         self.assertIsNotNone(upper_result.left_taper.fit_line)
-        for lower_value, upper_value in zip(lower_result.left_taper.fit_line, upper_result.left_taper.fit_line):
-            self.assertAlmostEqual(lower_value, upper_value, delta=0.01)
+        self.assertLess(lower_result.left_taper.fit_point_count, lower_result.left_taper.selected_point_count)
+        self.assertLess(upper_result.left_taper.fit_point_count, upper_result.left_taper.selected_point_count)
+        self.assertNotAlmostEqual(
+            lower_result.left_taper.fit_line[0],
+            upper_result.left_taper.fit_line[0],
+            delta=0.01,
+        )
 
 
 if __name__ == "__main__":

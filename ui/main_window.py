@@ -15,6 +15,7 @@ from fib_sem_measurement_tool.core.image_io import (
     load_image_unicode,
     read_image_metadata,
 )
+from fib_sem_measurement_tool.core.manual_measurement import make_manual_measurement, required_manual_points
 from fib_sem_measurement_tool.core.measurement_runner import run_measurement
 from fib_sem_measurement_tool.core.overlay import draw_overlay
 from fib_sem_measurement_tool.core.roi_utils import normalize_roi
@@ -59,12 +60,15 @@ class MainWindow(ctk.CTk):
         self.scale_bar_bboxes: Dict[str, tuple] = {}
         self._profile_image_path = ""
         self._last_option_signature = None
+        self._last_measured_settings: Optional[MeasurementSettings] = None
         self.image_cache = OrderedDict()
         self.image_cache_limit = 8
         self.render_cache = OrderedDict()
         self.render_cache_limit = 4
         self.thumbnail_overlay_cache = OrderedDict()
         self.thumbnail_overlay_cache_limit = 32
+        self._auto_measure_after_id = None
+        self._auto_measure_token = 0
         self.status_var = ctk.StringVar(value=t(self.language, "initial_status"))
         self.current_file_var = ctk.StringVar(value=t(self.language, "current_file_none"))
         self.language_var = ctk.StringVar(value=language_label(self.language))
@@ -116,6 +120,8 @@ class MainWindow(ctk.CTk):
             main,
             on_select_image=self.select_image,
             on_selection_changed=lambda: None,
+            on_delete_selected=self.delete_selected_images,
+            on_measure_selected=self.measure_selected_images,
             language=self.language,
         )
         self.thumbnail_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
@@ -130,6 +136,7 @@ class MainWindow(ctk.CTk):
             on_roi_changed=self.on_roi_changed,
             on_overlay_toggled=self.on_overlay_toggled,
             on_hover_profile=self.on_profile_hover,
+            on_manual_points=self.on_manual_points,
             language=self.language,
         )
         self.viewer.grid(row=0, column=0, sticky="nsew")
@@ -224,6 +231,7 @@ class MainWindow(ctk.CTk):
             messagebox.showwarning(t(self.language, "load_image_failed"), "\n".join(errors[:8]))
 
     def reset_images(self) -> None:
+        self._cancel_auto_measure()
         self.image_items = []
         self.current_index = -1
         self.current_image = None
@@ -234,6 +242,7 @@ class MainWindow(ctk.CTk):
         self.thumbnail_overlay_cache.clear()
         self._profile_image_path = ""
         self._last_option_signature = None
+        self._last_measured_settings = None
         self.current_file_var.set(t(self.language, "current_file_none"))
         self.viewer.clear()
         self.profile_graph.set_image(None)
@@ -248,6 +257,50 @@ class MainWindow(ctk.CTk):
         self.refresh_result_table()
         self.set_status(t(self.language, "initial_status"))
 
+    def delete_selected_images(self) -> None:
+        selected_indices = [index for index, item in enumerate(self.image_items) if item.selected]
+        if not selected_indices:
+            self.set_status(t(self.language, "no_selected_images"))
+            return
+
+        self._cancel_auto_measure()
+        selected_set = set(selected_indices)
+        removed_paths = {self.image_items[index].image_path for index in selected_indices}
+        current_removed = self.current_index in selected_set
+        removed_before_current = sum(1 for index in selected_indices if index < self.current_index)
+        previous_index = self.current_index
+
+        self.image_items = [item for index, item in enumerate(self.image_items) if index not in selected_set]
+        for path in removed_paths:
+            self.image_cache.pop(path, None)
+            self.scale_bar_bboxes.pop(path, None)
+        self.render_cache.clear()
+        self.thumbnail_overlay_cache.clear()
+        self._profile_image_path = ""
+        self._last_option_signature = None
+
+        if not self.image_items:
+            self.current_index = -1
+            self.current_image = None
+            self.current_image_path = ""
+            self._last_measured_settings = None
+            self.current_file_var.set(t(self.language, "current_file_none"))
+            self.viewer.clear()
+            self.profile_graph.set_image(None)
+            self.option_panel.set_settings(self.global_settings)
+            self.option_panel.set_candidate_summary(None, self.global_settings)
+        else:
+            if current_removed:
+                self.current_index = min(previous_index, len(self.image_items) - 1)
+                self.current_image_path = ""
+                self.load_current_image()
+            else:
+                self.current_index = max(0, previous_index - removed_before_current)
+                self.render_current_image()
+        self.refresh_thumbnail_panel()
+        self.refresh_result_table()
+        self.set_status(t(self.language, "selected_images_deleted").format(count=len(selected_indices)))
+
     def resolve_settings_for_item(self, item: ImageItem) -> MeasurementSettings:
         return resolve_effective_settings(item, self.global_settings)
 
@@ -261,8 +314,11 @@ class MainWindow(ctk.CTk):
             return
         if index == self.current_index and self.current_image is not None:
             return
+        self._cancel_auto_measure()
+        self._remember_current_measured_settings()
         previous_index = self.current_index
         self.current_index = index
+        self._apply_last_measured_settings_to_unmeasured_current()
         self.load_current_image()
         if previous_index != self.current_index:
             self.thumbnail_panel.set_current_index(self.current_index)
@@ -304,7 +360,26 @@ class MainWindow(ctk.CTk):
             self.current_image = self.load_image_cached(item.image_path)
             self.current_image_path = item.image_path
             self._last_option_signature = None
+        self._apply_last_measured_settings_to_unmeasured_current()
         self.render_current_image()
+
+    def _remember_current_measured_settings(self) -> None:
+        item = self.current_item()
+        if item is None or item.result is None:
+            return
+        self._last_measured_settings = self.resolve_settings_for_item(item).clone()
+
+    def _apply_last_measured_settings_to_unmeasured_current(self) -> None:
+        item = self.current_item()
+        if item is None or item.result is not None or item.settings is not None or self._last_measured_settings is None:
+            return
+        settings = self._last_measured_settings.clone()
+        if settings.roi is not None:
+            settings.roi = normalize_roi(settings.roi, item.image_size)
+        settings.roi_source_image = item.file_name
+        settings.settings_source = "image_specific"
+        item.settings = settings
+        self._last_option_signature = None
 
     def render_current_image(self, update_option_settings: bool = True) -> None:
         item = self.current_item()
@@ -323,6 +398,7 @@ class MainWindow(ctk.CTk):
         meta = f"{display_measurement_label} | {self._settings_source_label(settings.settings_source)}"
         self.current_file_var.set(item.file_name)
         self.viewer.set_content(self.current_image, rendered, title, meta, status)
+        self.viewer.set_manual_point_count(required_manual_points(settings.measurement_type))
         self.profile_graph.set_context(self.current_image, settings, item.result)
         self._profile_image_path = item.image_path
         if update_option_settings:
@@ -338,6 +414,7 @@ class MainWindow(ctk.CTk):
             settings.roi,
             settings.measurement_type,
             settings.measure_direction,
+            getattr(settings, "hole_target", "inner"),
             settings.distance_method,
             settings.edge_scan_mode,
             settings.normalize_grayscale_profiles,
@@ -454,7 +531,7 @@ class MainWindow(ctk.CTk):
             y_min, y_max = min(float(fit_y1), float(fit_y2)), max(float(fit_y1), float(fit_y2))
             if y_max - y_min <= 1e-6:
                 return float((fit_x1 + fit_x2) / 2.0), float(y_min)
-            base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 50.0))))
+            base_pct = max(0.0, min(100.0, float(getattr(settings, "base_height_pct", 30.0))))
             offset_pct = float(
                 getattr(settings, "right_offset_pct", 0.0)
                 if side == "right"
@@ -470,22 +547,16 @@ class MainWindow(ctk.CTk):
             x1, y1, x2, y2 = settings.roi
             if settings.show_roi:
                 draw.rectangle([point(x1, y1), point(x2, y2)], outline=(0, 210, 255), width=1)
-            drawn_rows = set()
             for side in taper_sides():
                 target = taper_target_point(side)
                 if target is None:
                     continue
                 target_x, target_y_float = target
                 target_y = int(round(target_y_float))
-                if target_y in drawn_rows:
-                    continue
-                drawn_rows.add(target_y)
-                guide_half = max(12, min(28, int(abs(x2 - x1) * scale_x * 0.18)))
+                guide_half = max(8, min(18, int(abs(x2 - x1) * scale_x * 0.055)))
                 cx, cy = point(target_x, target_y)
                 draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(20, 20, 26), width=4)
                 draw.line([(cx - guide_half, cy), (cx + guide_half, cy)], fill=(210, 190, 255), width=2)
-                draw.ellipse([(cx - 4, cy - 4), (cx + 4, cy + 4)], fill=(20, 20, 26))
-                draw.ellipse([(cx - 3, cy - 3), (cx + 3, cy + 3)], fill=(210, 190, 255), outline=(20, 20, 26))
 
         if result is not None and settings.show_selected_edges:
             for measurement, color in (
@@ -509,16 +580,6 @@ class MainWindow(ctk.CTk):
                     x1, y1, x2, y2 = taper.fit_line
                     draw.line([point(x1, y1), point(x2, y2)], fill=(20, 20, 26), width=3)
                     draw.line([point(x1, y1), point(x2, y2)], fill=color, width=2)
-            ellipse = result.ellipse_cd
-            if ellipse is not None and ellipse.center_x is not None and ellipse.center_y is not None:
-                if ellipse.horizontal_diameter_px is not None and ellipse.vertical_diameter_px is not None:
-                    cx, cy = point(ellipse.center_x, ellipse.center_y)
-                    rx = int(round(ellipse.horizontal_diameter_px * scale_x * 0.5))
-                    ry = int(round(ellipse.vertical_diameter_px * scale_y * 0.5))
-                    draw.ellipse([(cx - rx, cy - ry), (cx + rx, cy + ry)], outline=(125, 205, 255), width=2)
-                for x, y in ellipse.boundary_points:
-                    px, py = point(x, y)
-                    draw.ellipse([(px - 2, py - 2), (px + 2, py + 2)], fill=(245, 250, 255))
         return thumb
 
     def on_profile_hover(self, x: Optional[int], y: Optional[int]) -> None:
@@ -540,6 +601,50 @@ class MainWindow(ctk.CTk):
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
 
+    def _cancel_auto_measure(self) -> None:
+        if self._auto_measure_after_id is None:
+            return
+        try:
+            self.after_cancel(self._auto_measure_after_id)
+        except ValueError:
+            pass
+        self._auto_measure_after_id = None
+
+    def _schedule_auto_measure(self) -> None:
+        item = self.current_item()
+        if item is None:
+            self._cancel_auto_measure()
+            return
+        settings = self.resolve_settings_for_item(item)
+        if settings.roi is None:
+            self._cancel_auto_measure()
+            return
+        self._cancel_auto_measure()
+        self._auto_measure_token += 1
+        token = self._auto_measure_token
+        self._auto_measure_after_id = self.after(500, lambda: self._run_auto_measure(token))
+
+    def _run_auto_measure(self, token: int) -> None:
+        self._auto_measure_after_id = None
+        if token != self._auto_measure_token:
+            return
+        item = self.current_item()
+        if item is None:
+            return
+        settings = self.resolve_settings_for_item(item)
+        if settings.roi is None:
+            return
+        image = self.load_image_cached(item.image_path)
+        item.result = run_measurement(image, settings)
+        self.load_current_image()
+        self.refresh_thumbnail_panel()
+        self.refresh_result_table()
+        self.set_status(t(self.language, "option_changed").format(
+            file_name=item.file_name,
+            status=self._status_label(item.result.status),
+            confidence=item.result.overall_confidence,
+        ))
+
     def _ensure_item_settings(self, item: ImageItem, source: str = "image_specific") -> MeasurementSettings:
         settings = self.resolve_settings_for_item(item)
         settings.settings_source = source
@@ -552,6 +657,7 @@ class MainWindow(ctk.CTk):
             settings.roi,
             settings.measurement_type,
             settings.measure_direction,
+            getattr(settings, "hole_target", "inner"),
             settings.taper_side,
             settings.distance_method,
             settings.edge_scan_mode,
@@ -587,6 +693,7 @@ class MainWindow(ctk.CTk):
         if item is None:
             self.global_settings = self.option_panel.get_settings(self.global_settings)
             self.global_settings.settings_source = "global_default"
+            self._cancel_auto_measure()
             return
         base = self.resolve_settings_for_item(item)
         settings = self.option_panel.get_settings(base)
@@ -599,8 +706,10 @@ class MainWindow(ctk.CTk):
         if settings.roi is not None and self.current_image is not None:
             item.result = None
             self.render_current_image(update_option_settings=False)
+            self._schedule_auto_measure()
         else:
             self.render_current_image(update_option_settings=False)
+            self._cancel_auto_measure()
 
     def on_roi_changed(self, roi) -> None:
         item = self.current_item()
@@ -616,6 +725,7 @@ class MainWindow(ctk.CTk):
         item.result = None
         self.set_status(t(self.language, "roi_applied"))
         self.render_current_image()
+        self._schedule_auto_measure()
 
     def on_overlay_toggled(self, enabled: bool) -> None:
         self.overlay_enabled = enabled
@@ -642,10 +752,26 @@ class MainWindow(ctk.CTk):
             messagebox.showinfo(t(self.language, "scale_bar_detection"), str(result.get("message", t(self.language, "scale_bar_failed"))))
         self.render_current_image()
 
+    def on_manual_points(self, points: list[tuple[int, int]]) -> None:
+        item = self.current_item()
+        if item is None or self.current_image is None:
+            return
+        self._cancel_auto_measure()
+        settings = self._ensure_item_settings(item, "image_specific")
+        item.result = make_manual_measurement(points, settings)
+        self.render_cache.clear()
+        self.thumbnail_overlay_cache.clear()
+        self.render_current_image()
+        self.refresh_thumbnail_panel()
+        self.refresh_result_table()
+        self.set_status(t(self.language, "manual_measurement_complete").format(file_name=item.file_name))
+
     def _targets_for_scope(self, scope: str) -> List[ImageItem]:
         item = self.current_item()
         if scope == "all":
             return list(self.image_items)
+        if scope == "selected":
+            return [item for item in self.image_items if item.selected]
         return [item] if item else []
 
     def _apply_current_settings_to_targets(self, targets: List[ImageItem]) -> int:
@@ -698,13 +824,19 @@ class MainWindow(ctk.CTk):
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:
             return
+        self._cancel_auto_measure()
         scope = force_scope or "current"
         targets = self._targets_for_scope(scope)
         if not targets:
+            if scope == "selected":
+                self.set_status(t(self.language, "no_selected_images"))
             return
         applied_roi_count = 0
-        if scope == "all":
+        if scope in {"all", "selected"}:
             applied_roi_count = self._apply_current_settings_to_targets(targets)
+            if applied_roi_count == 0:
+                self.set_status(t(self.language, "roi_missing"))
+                return
         failures = 0
         for idx, item in enumerate(targets, start=1):
             self.set_status(t(self.language, "measuring").format(index=idx, total=len(targets), file_name=item.file_name))
@@ -713,12 +845,16 @@ class MainWindow(ctk.CTk):
             item.result = run_measurement(image, settings)
             if item.result.status == "Fail":
                 failures += 1
+        self._remember_current_measured_settings()
         self.load_current_image()
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
         roi_message = t(self.language, "roi_applied_count").format(count=applied_roi_count) if applied_roi_count else ""
         failure_message = t(self.language, "failures_count").format(count=failures) if failures else ""
         self.set_status(t(self.language, "measurement_complete").format(count=len(targets)) + roi_message + failure_message)
+
+    def measure_selected_images(self) -> None:
+        self.measure_scope("selected")
 
     def export_csv(self) -> None:
         if not self.image_items:

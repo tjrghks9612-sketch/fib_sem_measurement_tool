@@ -4,7 +4,7 @@ import csv
 from typing import Dict, Iterable, List, Optional
 
 from fib_sem_measurement_tool.models.image_item import ImageItem
-from fib_sem_measurement_tool.models.result import DistanceResult, EllipseCDResult, MeasurementResult, TaperSideResult
+from fib_sem_measurement_tool.models.result import DistanceResult, MeasurementResult, TaperSideResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings, resolve_effective_settings
 
 
@@ -73,21 +73,6 @@ CSV_COLUMNS = [
     "vertical_thk_valid_count",
     "vertical_thk_confidence",
     "vertical_thk_status",
-    "ellipse_cd_ray_attempt_count",
-    "ellipse_cd_valid_point_count",
-    "ellipse_cd_outlier_count",
-    "ellipse_cd_center_x",
-    "ellipse_cd_center_y",
-    "ellipse_cd_major_axis_px",
-    "ellipse_cd_minor_axis_px",
-    "ellipse_cd_angle_deg",
-    "ellipse_cd_horizontal_diameter_px",
-    "ellipse_cd_vertical_diameter_px",
-    "ellipse_cd_horizontal_diameter",
-    "ellipse_cd_vertical_diameter",
-    "ellipse_cd_confidence",
-    "ellipse_cd_status",
-    "ellipse_cd_warning_message",
     "overall_confidence",
     "status",
     "warning_message",
@@ -114,6 +99,68 @@ CSV_COLUMNS = [
     "right_taper_scanline_coverage",
     "right_taper_selected_point_count",
     "right_taper_fit_point_count",
+    "hole_target",
+    "hole_cd_horizontal_px",
+    "hole_cd_vertical_px",
+    "hole_cd_min_feret_px",
+    "hole_cd_max_feret_px",
+    "hole_cd_equivalent_diameter_px",
+    "hole_cd_area_px",
+    "hole_cd_perimeter_px",
+    "hole_cd_horizontal",
+    "hole_cd_vertical",
+    "hole_cd_min_feret",
+    "hole_cd_max_feret",
+    "hole_cd_equivalent_diameter",
+    "hole_cd_coverage",
+    "hole_cd_mean_radius",
+    "hole_cd_radius_std",
+    "hole_cd_mean_strength",
+    "hole_cd_smoothness",
+    "hole_cd_confidence",
+    "hole_cd_status",
+    "hole_cd_warning_message",
+    "hole_cd_ellipse_major_px",
+    "hole_cd_ellipse_minor_px",
+    "hole_cd_ellipse_angle_deg",
+    "hole_cd_ellipse_fit_error",
+    "hole_cd_ellipse_aspect_ratio",
+    "crater_cd_px",
+    "crater_cd",
+    "crater_thk_px",
+    "crater_thk",
+    "crater_thk_mean_px",
+    "crater_thk_max_px",
+    "crater_thk_min_px",
+    "crater_thk_median_px",
+    "crater_left_foot_x",
+    "crater_left_foot_y",
+    "crater_right_foot_x",
+    "crater_right_foot_y",
+    "crater_baseline_y_left",
+    "crater_baseline_y_right",
+    "crater_baseline_slope",
+    "crater_baseline_intercept",
+    "crater_baseline_confidence",
+    "crater_center_x",
+    "crater_top_y_at_center",
+    "crater_baseline_y_at_center",
+    "crater_left_taper_angle_horizontal",
+    "crater_right_taper_angle_horizontal",
+    "crater_left_taper_angle_vertical",
+    "crater_right_taper_angle_vertical",
+    "crater_avg_taper_angle",
+    "crater_taper_angle_diff",
+    "crater_left_taper_fit_error",
+    "crater_right_taper_fit_error",
+    "crater_left_taper_valid_count",
+    "crater_right_taper_valid_count",
+    "crater_top_profile_valid_count",
+    "crater_top_profile_coverage",
+    "crater_top_profile_smoothness",
+    "crater_overall_confidence",
+    "crater_status",
+    "crater_warning_message",
 ]
 
 
@@ -171,25 +218,77 @@ def _taper_values(side: str, row: Dict[str, object], result: Optional[TaperSideR
     row[f"{side}_taper_fit_point_count"] = result.fit_point_count
 
 
-def _ellipse_values(row: Dict[str, object], result: Optional[EllipseCDResult], settings: MeasurementSettings) -> None:
+def _hole_cd_values(row: Dict[str, object], result, settings: MeasurementSettings) -> None:
     if result is None:
         return
-    row["ellipse_cd_ray_attempt_count"] = result.ray_attempt_count
-    row["ellipse_cd_valid_point_count"] = result.valid_point_count
-    row["ellipse_cd_outlier_count"] = result.outlier_count
-    row["ellipse_cd_center_x"] = result.center_x
-    row["ellipse_cd_center_y"] = result.center_y
-    row["ellipse_cd_major_axis_px"] = result.major_axis_px
-    row["ellipse_cd_minor_axis_px"] = result.minor_axis_px
-    row["ellipse_cd_angle_deg"] = result.angle_deg
-    row["ellipse_cd_horizontal_diameter_px"] = result.horizontal_diameter_px
-    row["ellipse_cd_vertical_diameter_px"] = result.vertical_diameter_px
     scaled = result.scaled(settings.calibration.px_to_real)
-    row["ellipse_cd_horizontal_diameter"] = scaled["horizontal_diameter"]
-    row["ellipse_cd_vertical_diameter"] = scaled["vertical_diameter"]
-    row["ellipse_cd_confidence"] = result.confidence
-    row["ellipse_cd_status"] = result.status
-    row["ellipse_cd_warning_message"] = result.warning_message
+    row["hole_target"] = result.target
+    row["hole_cd_horizontal_px"] = result.horizontal_px
+    row["hole_cd_vertical_px"] = result.vertical_px
+    row["hole_cd_min_feret_px"] = result.min_feret_px
+    row["hole_cd_max_feret_px"] = result.max_feret_px
+    row["hole_cd_equivalent_diameter_px"] = result.equivalent_diameter_px
+    row["hole_cd_area_px"] = result.area_px
+    row["hole_cd_perimeter_px"] = result.perimeter_px
+    row["hole_cd_horizontal"] = scaled["horizontal"]
+    row["hole_cd_vertical"] = scaled["vertical"]
+    row["hole_cd_min_feret"] = scaled["min_feret"]
+    row["hole_cd_max_feret"] = scaled["max_feret"]
+    row["hole_cd_equivalent_diameter"] = scaled["equivalent_diameter"]
+    row["hole_cd_coverage"] = result.coverage
+    row["hole_cd_mean_radius"] = result.mean_radius
+    row["hole_cd_radius_std"] = result.radius_std
+    row["hole_cd_mean_strength"] = result.mean_strength
+    row["hole_cd_smoothness"] = result.smoothness
+    row["hole_cd_confidence"] = result.confidence
+    row["hole_cd_status"] = result.status
+    row["hole_cd_warning_message"] = result.warning_message
+    row["hole_cd_ellipse_major_px"] = result.ellipse_major_px
+    row["hole_cd_ellipse_minor_px"] = result.ellipse_minor_px
+    row["hole_cd_ellipse_angle_deg"] = result.ellipse_angle_deg
+    row["hole_cd_ellipse_fit_error"] = result.ellipse_fit_error
+    row["hole_cd_ellipse_aspect_ratio"] = result.ellipse_aspect_ratio
+
+
+def _crater_values(row: Dict[str, object], result) -> None:
+    if result is None:
+        return
+    row["crater_cd_px"] = result.cd_px
+    row["crater_cd"] = result.cd
+    row["crater_thk_px"] = result.thk_px
+    row["crater_thk"] = result.thk
+    row["crater_thk_mean_px"] = result.thk_mean_px
+    row["crater_thk_max_px"] = result.thk_max_px
+    row["crater_thk_min_px"] = result.thk_min_px
+    row["crater_thk_median_px"] = result.thk_median_px
+    row["crater_left_foot_x"] = result.left_foot_x
+    row["crater_left_foot_y"] = result.left_foot_y
+    row["crater_right_foot_x"] = result.right_foot_x
+    row["crater_right_foot_y"] = result.right_foot_y
+    row["crater_baseline_y_left"] = result.baseline_y_left
+    row["crater_baseline_y_right"] = result.baseline_y_right
+    row["crater_baseline_slope"] = result.baseline_slope
+    row["crater_baseline_intercept"] = result.baseline_intercept
+    row["crater_baseline_confidence"] = result.baseline_confidence
+    row["crater_center_x"] = result.center_x
+    row["crater_top_y_at_center"] = result.top_y_at_center
+    row["crater_baseline_y_at_center"] = result.baseline_y_at_center
+    row["crater_left_taper_angle_horizontal"] = result.left_taper_angle_horizontal
+    row["crater_right_taper_angle_horizontal"] = result.right_taper_angle_horizontal
+    row["crater_left_taper_angle_vertical"] = result.left_taper_angle_vertical
+    row["crater_right_taper_angle_vertical"] = result.right_taper_angle_vertical
+    row["crater_avg_taper_angle"] = result.avg_taper_angle
+    row["crater_taper_angle_diff"] = result.taper_angle_diff
+    row["crater_left_taper_fit_error"] = result.left_taper_fit_error
+    row["crater_right_taper_fit_error"] = result.right_taper_fit_error
+    row["crater_left_taper_valid_count"] = result.left_taper_valid_count
+    row["crater_right_taper_valid_count"] = result.right_taper_valid_count
+    row["crater_top_profile_valid_count"] = result.top_profile_valid_count
+    row["crater_top_profile_coverage"] = result.top_profile_coverage
+    row["crater_top_profile_smoothness"] = result.top_profile_smoothness
+    row["crater_overall_confidence"] = result.overall_confidence
+    row["crater_status"] = result.status
+    row["crater_warning_message"] = result.warning_message
 
 
 def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str, object]:
@@ -228,7 +327,8 @@ def make_result_row(item: ImageItem, settings: MeasurementSettings) -> Dict[str,
     _taper_values("right", row, result.right_taper)
     _distance_values("horizontal_cd", row, result.horizontal_cd, settings)
     _distance_values("vertical_thk", row, result.vertical_thk, settings)
-    _ellipse_values(row, result.ellipse_cd, settings)
+    _hole_cd_values(row, result.hole_cd, settings)
+    _crater_values(row, result.crater)
     row["overall_confidence"] = result.overall_confidence
     row["status"] = result.status
     row["warning_message"] = result.warning_message

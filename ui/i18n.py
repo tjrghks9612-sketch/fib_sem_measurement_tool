@@ -18,7 +18,8 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "가로 CD",
         "distance_vertical": "세로 THK",
         "distance_both": "가로 + 세로",
-        "ellipse_cd": "CD 타원 측정",
+        "hole_cd": "Hole CD 측정",
+        "crater": "Crater 측정",
     },
     "en": {
         "taper_single": "Single taper",
@@ -26,7 +27,8 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "Horizontal CD",
         "distance_vertical": "Vertical THK",
         "distance_both": "Horizontal + Vertical",
-        "ellipse_cd": "Ellipse CD",
+        "hole_cd": "Hole CD",
+        "crater": "Crater",
     },
     "vi": {
         "taper_single": "Taper một bên",
@@ -34,7 +36,8 @@ MEASUREMENT_LABELS: Dict[str, Dict[str, str]] = {
         "distance_horizontal": "CD ngang",
         "distance_vertical": "THK dọc",
         "distance_both": "Ngang + Dọc",
-        "ellipse_cd": "CD ellipse",
+        "hole_cd": "Hole CD",
+        "crater": "Crater",
     },
 }
 
@@ -60,6 +63,12 @@ TAPER_SIDE_LABELS: Dict[str, Dict[str, str]] = {
     "ko": {"left": "좌측", "right": "우측"},
     "en": {"left": "Left", "right": "Right"},
     "vi": {"left": "Trái", "right": "Phải"},
+}
+
+HOLE_TARGET_LABELS: Dict[str, Dict[str, str]] = {
+    "ko": {"inner": "내측 경계", "outer": "외측 경계"},
+    "en": {"inner": "Inner boundary", "outer": "Outer boundary"},
+    "vi": {"inner": "Biên trong", "outer": "Biên ngoài"},
 }
 
 STATUS_LABELS: Dict[str, Dict[str, str]] = {
@@ -92,6 +101,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "option_header": "검사 설정",
         "section_measurement": "측정 설정",
         "measurement_mode": "측정 모드",
+        "hole_target": "Hole 경계",
         "taper_side": "테이퍼 측",
         "representative_value": "대표값",
         "edge_scan_start": "탐색 시작",
@@ -131,6 +141,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "load_image_prompt": "이미지를 불러오세요.",
         "fit": "맞춤",
         "overlay": "오버레이",
+        "manual_mode": "수동",
+        "manual_clear": "초기화",
+        "manual_points_status": "수동 {count}/{total}",
         "profile_title": "그레이스케일 그래프",
         "profile_hover_prompt": "이미지에 마우스를 올리면 그레이스케일 그래프를 표시합니다",
         "profile_no_image": "이미지 없음",
@@ -148,6 +161,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "images_unit": "개 이미지",
         "select_all": "전체 선택",
         "clear": "해제",
+        "delete_selected_images": "선택 이미지 삭제",
+        "measure_selected": "선택 측정",
         "selection": "선택",
         "no_preview": "미리보기 없음",
         "roi_exists": "ROI 있음",
@@ -156,6 +171,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "not_calibrated": "미보정",
         "calibrated": "보정됨",
         "loaded_images": "이미지 {count}개를 불러왔습니다.",
+        "selected_images_deleted": "선택 이미지 {count}개를 삭제했습니다.",
+        "no_selected_images": "선택된 이미지가 없습니다.",
         "load_failures": " 실패 {count}개.",
         "load_image_failed": "이미지 불러오기 실패",
         "roi_too_small": "ROI가 너무 작습니다.",
@@ -170,6 +187,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "image_calibration_applied": "{file_name}: 캘리브레이션 적용 ({scale:.6g} {unit}/px)",
         "measuring": "측정 중 {index}/{total}: {file_name}",
         "measurement_complete": "이미지 {count}개 측정 완료.",
+        "manual_measurement_complete": "{file_name}: 수동 측정 완료.",
         "roi_applied_count": " / ROI 적용 {count}개",
         "failures_count": " / 실패 {count}개",
         "csv_saved": "CSV 저장 완료: {path}",
@@ -198,6 +216,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "option_header": "Inspection Settings",
         "section_measurement": "Measurement",
         "measurement_mode": "Mode",
+        "hole_target": "Hole Boundary",
         "taper_side": "Taper Side",
         "representative_value": "Representative",
         "edge_scan_start": "Scan Start",
@@ -237,6 +256,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "load_image_prompt": "Load an image.",
         "fit": "Fit",
         "overlay": "Overlay",
+        "manual_mode": "Manual",
+        "manual_clear": "Clear",
+        "manual_points_status": "Manual {count}/{total}",
         "profile_title": "Grayscale Profile",
         "profile_hover_prompt": "Hover over the image to show the grayscale profile",
         "profile_no_image": "No image",
@@ -254,6 +276,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "images_unit": "images",
         "select_all": "Select All",
         "clear": "Clear",
+        "delete_selected_images": "Delete Selected",
+        "measure_selected": "Measure Selected",
         "selection": "Selected",
         "no_preview": "No preview",
         "roi_exists": "ROI set",
@@ -262,6 +286,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "not_calibrated": "Not calibrated",
         "calibrated": "Calibrated",
         "loaded_images": "Loaded {count} images.",
+        "selected_images_deleted": "Deleted {count} selected images.",
+        "no_selected_images": "No selected images.",
         "load_failures": " Failed {count}.",
         "load_image_failed": "Failed to load images",
         "roi_too_small": "ROI is too small.",
@@ -276,6 +302,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "image_calibration_applied": "{file_name}: applied calibration ({scale:.6g} {unit}/px)",
         "measuring": "Measuring {index}/{total}: {file_name}",
         "measurement_complete": "Measured {count} images.",
+        "manual_measurement_complete": "{file_name}: manual measurement complete.",
         "roi_applied_count": " / ROI applied to {count}",
         "failures_count": " / failures {count}",
         "csv_saved": "CSV saved: {path}",
@@ -304,6 +331,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "option_header": "Cài đặt kiểm tra",
         "section_measurement": "Đo lường",
         "measurement_mode": "Chế độ",
+        "hole_target": "Biên hole",
         "taper_side": "Phía taper",
         "representative_value": "Giá trị đại diện",
         "edge_scan_start": "Bắt đầu quét",
@@ -343,6 +371,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "load_image_prompt": "Tải một ảnh.",
         "fit": "Vừa khung",
         "overlay": "Lớp phủ",
+        "manual_mode": "Thủ công",
+        "manual_clear": "Xóa",
+        "manual_points_status": "Thủ công {count}/{total}",
         "profile_title": "Biểu đồ grayscale",
         "profile_hover_prompt": "Di chuột lên ảnh để xem biểu đồ grayscale",
         "profile_no_image": "Không có ảnh",
@@ -360,6 +391,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "images_unit": "ảnh",
         "select_all": "Chọn tất cả",
         "clear": "Bỏ chọn",
+        "delete_selected_images": "Xóa ảnh đã chọn",
+        "measure_selected": "Đo ảnh đã chọn",
         "selection": "Đã chọn",
         "no_preview": "Không có xem trước",
         "roi_exists": "Có ROI",
@@ -368,6 +401,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "not_calibrated": "Chưa hiệu chuẩn",
         "calibrated": "Đã hiệu chuẩn",
         "loaded_images": "Đã tải {count} ảnh.",
+        "selected_images_deleted": "Đã xóa {count} ảnh đã chọn.",
+        "no_selected_images": "Không có ảnh nào được chọn.",
         "load_failures": " Lỗi {count}.",
         "load_image_failed": "Tải ảnh thất bại",
         "roi_too_small": "ROI quá nhỏ.",
@@ -382,6 +417,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "image_calibration_applied": "{file_name}: đã áp dụng hiệu chuẩn ({scale:.6g} {unit}/px)",
         "measuring": "Đang đo {index}/{total}: {file_name}",
         "measurement_complete": "Đã đo {count} ảnh.",
+        "manual_measurement_complete": "{file_name}: đo thủ công hoàn tất.",
         "roi_applied_count": " / ROI áp dụng cho {count}",
         "failures_count": " / lỗi {count}",
         "csv_saved": "Đã lưu CSV: {path}",
@@ -460,6 +496,14 @@ def profile_mode_key(label: str, default: str = "both") -> str:
 
 def taper_side_label(language: str, key: str) -> str:
     return _label(TAPER_SIDE_LABELS, language, key)
+
+
+def hole_target_label(language: str, key: str) -> str:
+    return _label(HOLE_TARGET_LABELS, language, key)
+
+
+def hole_target_key(label: str, default: str = "inner") -> str:
+    return _key_from_label(HOLE_TARGET_LABELS, label, default)
 
 
 def status_label(language: str, status: str) -> str:
