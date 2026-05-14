@@ -1,81 +1,51 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, Optional, Tuple
+from typing import Dict
 
-import cv2
 import numpy as np
 
 from fib_sem_measurement_tool.models.settings import CalibrationSettings
 
 
 def detect_scale_bar(image: np.ndarray) -> Dict[str, object]:
-    """Detect horizontal pure-green scale bar near the lower-left area.
+    """Detect a horizontal green scale bar in the lower-left quadrant only."""
+    if image is None or image.size == 0 or image.ndim < 3 or image.shape[2] < 3:
+        return {"status": "not_found", "pixel_length": None, "bbox": None, "message": "scale_bar_not_found"}
 
-    Priority is given to connected components within the lower-left search window,
-    while still allowing fallback detection on the full image.
-    """
-    if image is None or image.size == 0:
-        return {"status": "not_found", "pixel_length": None, "bbox": None, "message": "이미지가 비어 있습니다"}
-
-    # BGR image from OpenCV: green line is (0, 255, 0) in RGB/BGR with a small tolerance.
+    height, width = image.shape[:2]
     b = image[:, :, 0]
     g = image[:, :, 1]
     r = image[:, :, 2]
-    green_mask = (g >= 245) & (b <= 12) & (r <= 12)
+    green_mask = (g >= 200) & (r <= 80) & (b <= 80)
 
-    height, width = image.shape[:2]
-    if not np.any(green_mask):
-        return {
-            "status": "not_found",
-            "pixel_length": None,
-            "bbox": None,
-            "message": "좌하단의 초록색 스케일바(0,255,0)를 찾지 못했습니다",
-        }
-
-    search_windows = [
-        ("bottom_left", 0, int(width * 0.55), int(height * 0.60), height),
-        ("full", 0, width, 0, height),
-    ]
-
-    best: Optional[Dict[str, object]] = None
-    for region_name, x0, x1, y0, y1 in search_windows:
-        crop = green_mask[y0:y1, x0:x1]
-        if crop.size == 0 or not np.any(crop):
-            continue
-
-        binary = (crop.astype(np.uint8)) * 255
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            if w < max(12, int(width * 0.03)):
-                continue
-            if h > max(12, int(height * 0.05)):
-                continue
-            aspect = w / max(h, 1)
-            if aspect < 4.0:
-                continue
-            score = float(w) * (1.2 if region_name == "bottom_left" else 1.0)
-            candidate = {
-                "status": "detected",
-                "region": region_name,
-                "pixel_length": float(w),
-                "bbox": (int(x0 + x), int(y0 + y), int(x0 + x + w), int(y0 + y + h)),
-                "score": score,
-            }
-            if best is None or candidate["score"] > best["score"]:
-                best = candidate
+    x0, x1 = 0, width // 2
+    y0, y1 = height // 2, height
+    crop = green_mask[y0:y1, x0:x1]
+    best: Dict[str, object] | None = None
+    for local_y in range(crop.shape[0]):
+        row = crop[local_y]
+        run_start = None
+        for idx, is_green in enumerate(np.r_[row, False]):
+            if bool(is_green) and run_start is None:
+                run_start = idx
+            elif not bool(is_green) and run_start is not None:
+                run_end = idx - 1
+                length = run_end - run_start + 1
+                if length >= 15 and (best is None or length > best["pixel_length"]):
+                    y = y0 + local_y
+                    best = {
+                        "status": "detected",
+                        "region": "lower_left_quadrant",
+                        "pixel_length": float(length),
+                        "bbox": (int(x0 + run_start), int(y), int(x0 + run_end + 1), int(y + 1)),
+                        "line": (int(x0 + run_start), int(y), int(x0 + run_end), int(y)),
+                        "score": float(length),
+                    }
+                run_start = None
 
     if best is None:
-        return {
-            "status": "not_found",
-            "pixel_length": None,
-            "bbox": None,
-            "message": "초록색 스케일바 후보를 찾지 못했습니다",
-        }
+        return {"status": "not_found", "pixel_length": None, "bbox": None, "message": "scale_bar_not_found"}
     return best
 
 
@@ -101,4 +71,3 @@ def apply_calibration(
 
 def clone_calibration(calibration: CalibrationSettings) -> CalibrationSettings:
     return replace(calibration)
-

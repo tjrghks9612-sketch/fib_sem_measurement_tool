@@ -385,8 +385,9 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
     baseline_center = float(y1 + baseline_y[center_local])
     top_center = float(y1 + top_y[center_local])
 
-    lower_ratio = 0.10
-    upper_ratio = 0.80
+    taper_height_percent = max(0.0, min(100.0, float(getattr(settings, "crater_taper_height_percent", 15.0))))
+    lower_ratio = taper_height_percent / 100.0
+    upper_ratio = 0.80 if lower_ratio < 0.80 else min(1.0, lower_ratio + 0.05)
     baseline_median = float(np.median(baseline_y[left : right + 1]))
     left_points = [
         (x, y)
@@ -400,6 +401,8 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
     ]
     left_fit = _fit_taper(left_points)
     right_fit = _fit_taper(right_points)
+    left_taper_measure_y = float(y1 + baseline_median - max_height * lower_ratio)
+    right_taper_measure_y = left_taper_measure_y
     avg_taper = None
     taper_diff = None
     if left_fit.angle_horizontal is not None and right_fit.angle_horizontal is not None:
@@ -473,6 +476,9 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
         right_taper_fit_error=right_fit.error,
         left_taper_valid_count=left_fit.count,
         right_taper_valid_count=right_fit.count,
+        taper_height_percent=taper_height_percent,
+        left_taper_measure_y=left_taper_measure_y,
+        right_taper_measure_y=right_taper_measure_y,
         left_taper_status=left_fit.status,
         right_taper_status=right_fit.status,
         confidence=overall,

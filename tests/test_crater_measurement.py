@@ -44,6 +44,9 @@ class CraterMeasurementTest(unittest.TestCase):
         self.assertLess(crater.thk_px, 90)
         self.assertIsNotNone(crater.left_taper_angle_horizontal)
         self.assertIsNotNone(crater.right_taper_angle_horizontal)
+        self.assertEqual(crater.taper_height_percent, 15.0)
+        self.assertIsNotNone(crater.left_taper_measure_y)
+        self.assertIsNotNone(crater.right_taper_measure_y)
         self.assertGreater(crater.top_profile_valid_count, 150)
 
     def test_crater_csv_columns_are_added_without_renaming_existing_columns(self) -> None:
@@ -57,8 +60,10 @@ class CraterMeasurementTest(unittest.TestCase):
         self.assertIn("hole_cd_horizontal_px", CSV_COLUMNS)
         self.assertIn("crater_cd_px", CSV_COLUMNS)
         self.assertIn("crater_thk_px", CSV_COLUMNS)
+        self.assertIn("crater_taper_height_percent", CSV_COLUMNS)
         self.assertGreater(row["crater_cd_px"], 0)
         self.assertGreater(row["crater_thk_px"], 0)
+        self.assertEqual(row["crater_taper_height_percent"], 15.0)
 
     def test_non_crater_rows_leave_crater_columns_blank(self) -> None:
         item = ImageItem(image_path="unmeasured.png", file_name="unmeasured.png", image_size=(1, 1), result=None)

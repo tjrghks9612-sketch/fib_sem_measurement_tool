@@ -86,16 +86,10 @@ class MainWindow(ctk.CTk):
         self.load_images_button.pack(side="left", padx=4)
         self.load_folder_button = ctk.CTkButton(toolbar, text=t(self.language, "load_folder"), width=140, command=self.load_folder_dialog)
         self.load_folder_button.pack(side="left", padx=4)
-        self.reset_images_button = ctk.CTkButton(toolbar, text=t(self.language, "reset_images"), width=120, fg_color="#203246", command=self.reset_images)
-        self.reset_images_button.pack(side="left", padx=4)
         self.previous_button = ctk.CTkButton(toolbar, text=t(self.language, "previous"), width=90, fg_color="#142234", command=self.previous_image)
         self.previous_button.pack(side="left", padx=(18, 4))
         self.next_button = ctk.CTkButton(toolbar, text=t(self.language, "next"), width=90, fg_color="#142234", command=self.next_image)
         self.next_button.pack(side="left", padx=4)
-        self.measure_current_button = ctk.CTkButton(toolbar, text=t(self.language, "measure_current"), width=140, command=lambda: self.measure_scope("current"))
-        self.measure_current_button.pack(side="left", padx=(18, 4))
-        self.measure_all_button = ctk.CTkButton(toolbar, text=t(self.language, "measure_all"), width=120, fg_color="#203246", command=lambda: self.measure_scope("all"))
-        self.measure_all_button.pack(side="left", padx=4)
         self.csv_button = ctk.CTkButton(toolbar, text=t(self.language, "save_csv"), width=110, command=self.export_csv)
         self.csv_button.pack(side="right", padx=4)
         self.language_menu = ctk.CTkOptionMenu(
@@ -178,11 +172,8 @@ class MainWindow(ctk.CTk):
         self.toolbar_title_label.configure(text=t(self.language, "toolbar_title"))
         self.load_images_button.configure(text=t(self.language, "load_images"))
         self.load_folder_button.configure(text=t(self.language, "load_folder"))
-        self.reset_images_button.configure(text=t(self.language, "reset_images"))
         self.previous_button.configure(text=t(self.language, "previous"))
         self.next_button.configure(text=t(self.language, "next"))
-        self.measure_current_button.configure(text=t(self.language, "measure_current"))
-        self.measure_all_button.configure(text=t(self.language, "measure_all"))
         self.csv_button.configure(text=t(self.language, "save_csv"))
         self.language_label_widget.configure(text=t(self.language, "language"))
         if self.current_item() is None:
@@ -746,9 +737,6 @@ class MainWindow(ctk.CTk):
             self.scale_bar_bboxes[item.image_path] = result.get("bbox")
             self.set_status(t(self.language, "scale_bar_detected").format(pixel_length=pixel_length))
         else:
-            settings = self._ensure_item_settings(item, "image_specific")
-            settings.calibration.detected_scale_bar_px = None
-            self.option_panel.set_detected_scale_bar(None)
             self.set_status(str(result.get("message", t(self.language, "scale_bar_failed"))))
             messagebox.showinfo(t(self.language, "scale_bar_detection"), str(result.get("message", t(self.language, "scale_bar_failed"))))
         self.render_current_image()

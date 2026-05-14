@@ -155,6 +155,9 @@ CSV_COLUMNS = [
     "crater_right_taper_fit_error",
     "crater_left_taper_valid_count",
     "crater_right_taper_valid_count",
+    "crater_taper_height_percent",
+    "crater_left_taper_measure_y",
+    "crater_right_taper_measure_y",
     "crater_top_profile_valid_count",
     "crater_top_profile_coverage",
     "crater_top_profile_smoothness",
@@ -283,6 +286,9 @@ def _crater_values(row: Dict[str, object], result) -> None:
     row["crater_right_taper_fit_error"] = result.right_taper_fit_error
     row["crater_left_taper_valid_count"] = result.left_taper_valid_count
     row["crater_right_taper_valid_count"] = result.right_taper_valid_count
+    row["crater_taper_height_percent"] = result.taper_height_percent
+    row["crater_left_taper_measure_y"] = result.left_taper_measure_y
+    row["crater_right_taper_measure_y"] = result.right_taper_measure_y
     row["crater_top_profile_valid_count"] = result.top_profile_valid_count
     row["crater_top_profile_coverage"] = result.top_profile_coverage
     row["crater_top_profile_smoothness"] = result.top_profile_smoothness

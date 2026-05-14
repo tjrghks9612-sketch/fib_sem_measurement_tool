@@ -261,6 +261,9 @@ class CraterResult:
     right_taper_fit_error: Optional[float] = None
     left_taper_valid_count: int = 0
     right_taper_valid_count: int = 0
+    taper_height_percent: Optional[float] = None
+    left_taper_measure_y: Optional[float] = None
+    right_taper_measure_y: Optional[float] = None
     left_taper_status: str = "Fail"
     right_taper_status: str = "Fail"
     confidence: float = 0.0
@@ -298,10 +301,10 @@ class MeasurementResult:
         chunks: List[str] = []
         if self.horizontal_cd and self.horizontal_cd.selected_px is not None:
             value = self.horizontal_cd.selected_px * px_to_real
-            chunks.append(f"CD {value:.3g} {unit}")
+            chunks.append(f"CD {value:.2f} {unit}")
         if self.vertical_thk and self.vertical_thk.selected_px is not None:
             value = self.vertical_thk.selected_px * px_to_real
-            chunks.append(f"THK {value:.3g} {unit}")
+            chunks.append(f"THK {value:.2f} {unit}")
         if self.left_taper and self.left_taper.angle_horizontal is not None:
             chunks.append(f"좌 {self.left_taper.angle_horizontal:.1f} deg")
         if self.right_taper and self.right_taper.angle_horizontal is not None:
@@ -313,19 +316,19 @@ class MeasurementResult:
                 if self.ellipse_cd.vertical_diameter_px is not None
                 else None
             )
-            chunks.append(f"Ellipse H {h_value:.3g} {unit}")
+            chunks.append(f"Ellipse H {h_value:.2f} {unit}")
             if v_value is not None:
-                chunks.append(f"Ellipse V {v_value:.3g} {unit}")
+                chunks.append(f"Ellipse V {v_value:.2f} {unit}")
         if self.hole_cd and self.hole_cd.horizontal_px is not None:
             h_value = self.hole_cd.horizontal_px * px_to_real
             v_value = self.hole_cd.vertical_px * px_to_real if self.hole_cd.vertical_px is not None else None
-            chunks.append(f"Hole H {h_value:.3g} {unit}")
+            chunks.append(f"Hole H {h_value:.2f} {unit}")
             if v_value is not None:
-                chunks.append(f"Hole V {v_value:.3g} {unit}")
+                chunks.append(f"Hole V {v_value:.2f} {unit}")
         if self.crater and self.crater.cd_px is not None:
-            chunks.append(f"Crater CD {self.crater.cd_px * px_to_real:.3g} {unit}")
+            chunks.append(f"Crater CD {self.crater.cd_px * px_to_real:.2f} {unit}")
             if self.crater.thk_px is not None:
-                chunks.append(f"THK {self.crater.thk_px * px_to_real:.3g} {unit}")
+                chunks.append(f"THK {self.crater.thk_px * px_to_real:.2f} {unit}")
         status_label = {
             "OK": "정상",
             "Check": "확인",
