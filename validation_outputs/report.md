@@ -90,10 +90,10 @@
 
 ## Hole CD 1.png
 - expected_mode: Hole CD
-- measured_values: hole_h_px=345.3, hole_v_px=324.3, hole_target=inner, hole_coverage=0.975
-- confidence: 72.54
-- status: Check
-- warning_message: radius_outliers_interpolated
+- measured_values: hole_h_px=300.6, hole_v_px=322.3, hole_target=inner, hole_coverage=1
+- confidence: 86.4
+- status: OK
+- warning_message: -
 - overlay_path: validation_outputs/overlays/Hole CD 1_overlay.png
 - target_overlay_path: validation_outputs/target_overlays/Hole CD 1_target.png
 - validation: pass
@@ -101,8 +101,8 @@
 
 ## Hole CD 2.png
 - expected_mode: Hole CD
-- measured_values: hole_h_px=351.2, hole_v_px=393.2, hole_target=inner, hole_coverage=1
-- confidence: 80.53
+- measured_values: hole_h_px=343.2, hole_v_px=336.7, hole_target=inner, hole_coverage=1
+- confidence: 85.77
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Hole CD 2_overlay.png
