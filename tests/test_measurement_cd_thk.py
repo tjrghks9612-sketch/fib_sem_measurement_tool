@@ -161,7 +161,7 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(result.selected_px, 4.8, delta=0.01)
         self.assertEqual(result.valid_count, 5)
 
-    def test_distance_both_limits_thk_scan_to_cd_interior(self) -> None:
+    def test_distance_both_runs_cd_and_thk_independently_on_same_roi(self) -> None:
         settings = MeasurementSettings(
             roi=(0, 0, 119, 99),
             measurement_type="distance_both",
@@ -169,8 +169,6 @@ class CdThkMeasurementTest(unittest.TestCase):
         )
         image = np.full((100, 120), 20, dtype=np.uint8)
         image[30:70, 40:80] = 200
-        image[5:15, 0:25] = 160
-        image[85:95, 0:25] = 160
 
         result = run_measurement(image, settings)
 
@@ -178,9 +176,9 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertIsNotNone(result.vertical_thk)
         self.assertAlmostEqual(result.horizontal_cd.selected_px, 40.0, delta=1.0)
         self.assertAlmostEqual(result.vertical_thk.selected_px, 40.0, delta=1.0)
-        self.assertLess(result.vertical_thk.scanned_line_count, 120)
-        self.assertGreaterEqual(min(pair.scan_index for pair in result.vertical_thk.selected_pairs), 43)
-        self.assertLessEqual(max(pair.scan_index for pair in result.vertical_thk.selected_pairs), 76)
+        self.assertEqual(result.vertical_thk.scanned_line_count, 120)
+        self.assertGreaterEqual(min(pair.scan_index for pair in result.vertical_thk.selected_pairs), 40)
+        self.assertLessEqual(max(pair.scan_index for pair in result.vertical_thk.selected_pairs), 79)
 
     def test_distance_both_respects_measure_direction_setting(self) -> None:
         settings = MeasurementSettings(

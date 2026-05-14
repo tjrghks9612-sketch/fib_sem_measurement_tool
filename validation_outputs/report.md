@@ -7,6 +7,7 @@
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/가로 CD 1_overlay.png
+- target_overlay_path: -
 - validation: pass
 - failure_reason: -
 
@@ -17,6 +18,7 @@
 - status: Check
 - warning_message: -
 - overlay_path: validation_outputs/overlays/가로 CD 2_overlay.png
+- target_overlay_path: -
 - validation: pass
 - failure_reason: -
 
@@ -27,6 +29,7 @@
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/세로 THK 1_overlay.png
+- target_overlay_path: -
 - validation: pass
 - failure_reason: -
 
@@ -37,85 +40,94 @@
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/세로 THK 2_overlay.png
+- target_overlay_path: -
 - validation: pass
 - failure_reason: -
 
 ## 가로+세로 1.png
 - expected_mode: 가로+세로
-- measured_values: horizontal_cd_px=418.3, vertical_thk_px=655
+- measured_values: horizontal_cd_px=418.3, vertical_thk_px=653
 - confidence: 92.1
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/가로+세로 1_overlay.png
+- target_overlay_path: -
 - validation: pass
 - failure_reason: -
 
 ## 가로+세로 2.png
 - expected_mode: 가로+세로
-- measured_values: horizontal_cd_px=466.9, vertical_thk_px=666
+- measured_values: horizontal_cd_px=466.9, vertical_thk_px=669
 - confidence: 92.94
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/가로+세로 2_overlay.png
+- target_overlay_path: -
 - validation: pass
 - failure_reason: -
 
 ## Taper 1.png
 - expected_mode: Taper
-- measured_values: left_taper_deg=87.1, left_taper_points=495, right_taper_deg=87.1, right_taper_points=489
-- confidence: 97.3
-- status: OK
-- warning_message: -
+- measured_values: left_taper_deg=83.26, left_taper_points=539, right_taper_deg=83.1, right_taper_points=502
+- confidence: 69.74
+- status: Check
+- warning_message: right dark trench boundary unstable
 - overlay_path: validation_outputs/overlays/Taper 1_overlay.png
+- target_overlay_path: validation_outputs/target_overlays/Taper 1_target.png
 - validation: pass
 - failure_reason: -
 
 ## Taper 2.png
 - expected_mode: Taper
-- measured_values: left_taper_deg=78.66, left_taper_points=457, right_taper_deg=78.42, right_taper_points=462
-- confidence: 100
-- status: OK
-- warning_message: -
+- measured_values: left_taper_deg=73.06, left_taper_points=374, right_taper_deg=72.89, right_taper_points=529
+- confidence: 75.27
+- status: Check
+- warning_message: right dark trench boundary unstable
 - overlay_path: validation_outputs/overlays/Taper 2_overlay.png
+- target_overlay_path: validation_outputs/target_overlays/Taper 2_target.png
 - validation: pass
 - failure_reason: -
 
 ## Hole CD 1.png
 - expected_mode: Hole CD
-- measured_values: hole_h_px=349, hole_v_px=329.3, hole_target=inner, hole_coverage=1
-- confidence: 81.94
-- status: OK
-- warning_message: -
+- measured_values: hole_h_px=345.3, hole_v_px=324.3, hole_target=inner, hole_coverage=0.975
+- confidence: 72.54
+- status: Check
+- warning_message: radius_outliers_interpolated
 - overlay_path: validation_outputs/overlays/Hole CD 1_overlay.png
+- target_overlay_path: validation_outputs/target_overlays/Hole CD 1_target.png
 - validation: pass
 - failure_reason: -
 
 ## Hole CD 2.png
 - expected_mode: Hole CD
-- measured_values: hole_h_px=321.5, hole_v_px=315, hole_target=inner, hole_coverage=1
-- confidence: 78.44
-- status: Check
+- measured_values: hole_h_px=351.2, hole_v_px=393.2, hole_target=inner, hole_coverage=1
+- confidence: 80.53
+- status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Hole CD 2_overlay.png
+- target_overlay_path: validation_outputs/target_overlays/Hole CD 2_target.png
 - validation: pass
 - failure_reason: -
 
 ## Crater 1.png
 - expected_mode: Crater
-- measured_values: crater_cd_px=652, crater_thk_px=155.9, crater_left_taper_deg=17.82, crater_right_taper_deg=15.95
-- confidence: 65.42
-- status: Check
-- warning_message: crater_left_taper_unstable;crater_right_taper_unstable
+- measured_values: crater_cd_px=664, crater_thk_px=154.9, crater_left_taper_deg=40.35, crater_right_taper_deg=40.44
+- confidence: 84.02
+- status: OK
+- warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 1_overlay.png
+- target_overlay_path: validation_outputs/target_overlays/Crater 1_target.png
 - validation: pass
 - failure_reason: -
 
 ## Crater 2.png
 - expected_mode: Crater
-- measured_values: crater_cd_px=881, crater_thk_px=176.7, crater_left_taper_deg=30.55, crater_right_taper_deg=29.89
-- confidence: 89.09
+- measured_values: crater_cd_px=844, crater_thk_px=152.8, crater_left_taper_deg=31.08, crater_right_taper_deg=31.24
+- confidence: 91.04
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 2_overlay.png
+- target_overlay_path: validation_outputs/target_overlays/Crater 2_target.png
 - validation: pass
 - failure_reason: -

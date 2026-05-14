@@ -101,6 +101,38 @@ def _stroke_polyline(image: np.ndarray, points: np.ndarray, closed: bool, color:
     cv2.polylines(image, [points], closed, color, thickness, cv2.LINE_AA)
 
 
+def _stroke_trace_segments(
+    image: np.ndarray,
+    points: Sequence[tuple[float, float]],
+    color: Color,
+    thickness: int = 1,
+    *,
+    max_dx: float = 22.0,
+    max_dy: float = 3.5,
+    min_points: int = 4,
+    longest_only: bool = False,
+) -> None:
+    if len(points) < 2:
+        return
+    ordered = sorted(((float(x), float(y)) for x, y in points), key=lambda item: (item[1], item[0]))
+    segments: list[list[tuple[int, int]]] = []
+    current: list[tuple[int, int]] = []
+    previous: Optional[tuple[float, float]] = None
+    for x, y in ordered:
+        if previous is not None and (abs(x - previous[0]) > max_dx or abs(y - previous[1]) > max_dy):
+            if len(current) >= min_points:
+                segments.append(current)
+            current = []
+        current.append((int(round(x)), int(round(y))))
+        previous = (x, y)
+    if len(current) >= min_points:
+        segments.append(current)
+    if longest_only and segments:
+        segments = [max(segments, key=len)]
+    for segment in segments:
+        _stroke_polyline(image, np.asarray(segment, dtype=np.int32).reshape(-1, 1, 2), False, color, thickness)
+
+
 def _label(image: np.ndarray, text: str, origin: Tuple[int, int], color: Color, scale: float = 0.55) -> None:
     font_size = max(11, int(round(scale * 28)))
     font = _ui_font(font_size)
@@ -271,6 +303,8 @@ def _draw_distance(image: np.ndarray, result: DistanceResult, settings: Measurem
 
 
 def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, settings: MeasurementSettings, language: str) -> None:
+    if taper.points and settings.show_selected_edges:
+        _stroke_trace_segments(image, taper.points, color, 1, min_points=10, longest_only=True)
     if settings.show_fit_line and taper.fit_line:
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
@@ -342,9 +376,34 @@ def _draw_line_tuple(image: np.ndarray, line, color: Color, thickness: int = 2) 
 
 
 def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> None:
+    if result.top_profile_points and result.baseline_line:
+        top_points = sorted(((float(x), float(y)) for x, y in result.top_profile_points), key=lambda item: item[0])
+        bx1, by1, bx2, by2 = result.baseline_line
+        denom = float(bx2 - bx1)
+        if abs(denom) > 1e-6 and len(top_points) >= 3:
+            bottom_points = [
+                (
+                    int(round(x)),
+                    int(round(float(by1) + (float(by2) - float(by1)) * ((float(x) - float(bx1)) / denom))),
+                )
+                for x, _y in reversed(top_points)
+            ]
+            polygon = np.asarray(
+                [(int(round(x)), int(round(y))) for x, y in top_points] + bottom_points,
+                dtype=np.int32,
+            ).reshape(-1, 1, 2)
+            overlay = image.copy()
+            cv2.fillPoly(overlay, [polygon], ELLIPSE_COLOR, cv2.LINE_AA)
+            cv2.addWeighted(overlay, 0.14, image, 0.86, 0, image)
     if result.top_profile_points:
         points = np.asarray(result.top_profile_points, dtype=np.int32).reshape(-1, 1, 2)
         _stroke_polyline(image, points, False, ELLIPSE_COLOR, 2)
+    if result.left_boundary_points:
+        points = np.asarray(result.left_boundary_points, dtype=np.int32).reshape(-1, 1, 2)
+        _stroke_polyline(image, points, False, TAPER_LEFT_COLOR, 1)
+    if result.right_boundary_points:
+        points = np.asarray(result.right_boundary_points, dtype=np.int32).reshape(-1, 1, 2)
+        _stroke_polyline(image, points, False, TAPER_RIGHT_COLOR, 1)
     _draw_line_tuple(image, result.baseline_line, THK_COLOR, 2)
     _draw_line_tuple(image, result.cd_line, CD_COLOR, 2)
     _draw_line_tuple(image, result.thk_line, THK_COLOR, 2)

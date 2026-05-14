@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from typing import Optional, Sequence
 
 import cv2
 import numpy as np
@@ -11,6 +11,7 @@ from fib_sem_measurement_tool.core.grayscale_line_scan import (
     moving_average_nan,
     refine_boundary_candidates_by_line,
 )
+from fib_sem_measurement_tool.core.target_preprocessing import preprocess_target_roi
 from fib_sem_measurement_tool.models.result import EdgeScanResult, MeasurementResult, RawEdgeCandidate, TaperSideResult
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -24,6 +25,7 @@ TAPER_FIT_PREFILTER_RESIDUAL_PX = 6.0
 TAPER_GAP_INTERPOLATION_LIMIT = 6
 TAPER_SMOOTH_WINDOW = 7
 TAPER_FINAL_SMOOTH_KERNEL = 4
+DARK_OBJECT_EDGE_MARGIN_RATIO = 0.025
 
 
 def _status_from_points(point_count: int, coverage: float) -> str:
@@ -328,6 +330,223 @@ def _line_angles(x1: float, y1: float, x2: float, y2: float) -> tuple[float, flo
     return float(angle_horizontal), float(angle_vertical)
 
 
+def _dark_threshold(crop: np.ndarray) -> tuple[np.ndarray, float]:
+    source = crop.astype(np.uint8, copy=False)
+    blurred = cv2.GaussianBlur(source, (5, 5), 0)
+    otsu, _binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    percentile = float(np.percentile(blurred, 42.0))
+    threshold = min(float(otsu), percentile)
+    return blurred, threshold
+
+
+def _segments_from_row(mask_row: np.ndarray) -> list[tuple[int, int]]:
+    segments: list[tuple[int, int]] = []
+    start: Optional[int] = None
+    for idx, value in enumerate(mask_row):
+        if bool(value) and start is None:
+            start = idx
+        elif not bool(value) and start is not None:
+            segments.append((start, idx - 1))
+            start = None
+    if start is not None:
+        segments.append((start, len(mask_row) - 1))
+    return segments
+
+
+def _select_central_dark_interval(
+    mask_row: np.ndarray,
+    center_x: float,
+    previous: Optional[tuple[int, int]],
+    min_width: int,
+    edge_margin: int,
+) -> Optional[tuple[int, int]]:
+    width = int(mask_row.size)
+    max_width = int(width * 0.92)
+    candidates = []
+    for start, end in _segments_from_row(mask_row):
+        segment_width = end - start + 1
+        if segment_width < min_width or segment_width > max_width:
+            continue
+        if start <= edge_margin or end >= width - edge_margin - 1:
+            continue
+        midpoint = (start + end) * 0.5
+        overlap_score = 0.0
+        if previous is not None:
+            overlap = max(0, min(end, previous[1]) - max(start, previous[0]) + 1)
+            overlap_score = float(overlap) * 1.5 - abs(midpoint - (previous[0] + previous[1]) * 0.5)
+        center_score = -abs(midpoint - center_x)
+        candidates.append((segment_width + center_score * 0.8 + overlap_score, start, end))
+    if not candidates:
+        return None
+    _score, start, end = max(candidates, key=lambda item: item[0])
+    return int(start), int(end)
+
+
+def _fill_smooth_trace(values: np.ndarray, max_gap: int = 18, smooth_window: int = 11) -> np.ndarray:
+    filled = fill_small_gaps_nan(values, max_gap)
+    filled = moving_average_nan(filled, smooth_window)
+    filled = fill_small_gaps_nan(filled, max_gap)
+    filled = moving_average_nan(filled, smooth_window)
+    return filled
+
+
+def _candidate_from_trace_point(
+    side: str,
+    x: float,
+    y: float,
+    roi: Sequence[int],
+    local_y: int,
+) -> RawEdgeCandidate:
+    x1, y1, _x2, _y2 = [int(v) for v in roi]
+    return RawEdgeCandidate(
+        scan_axis="horizontal",
+        scan_index=int(round(y)),
+        local_scan_index=int(local_y),
+        position=float(x - x1),
+        image_x=float(x),
+        image_y=float(y),
+        strength=0.0,
+        signed_delta=-1.0 if side == "left" else 1.0,
+        sign=-1 if side == "left" else 1,
+        grayscale_before=0.0,
+        grayscale_after=0.0,
+    )
+
+
+def _robust_fit_x_by_y(points: np.ndarray) -> tuple[float, float, float, np.ndarray]:
+    ys = points[:, 1]
+    xs = points[:, 0]
+    keep = np.ones(points.shape[0], dtype=bool)
+    slope = 0.0
+    intercept = float(np.median(xs))
+    for _iteration in range(4):
+        if int(np.sum(keep)) < 6:
+            break
+        slope, intercept = np.polyfit(ys[keep], xs[keep], 1)
+        residuals = xs - (slope * ys + intercept)
+        mad = float(np.median(np.abs(residuals[keep] - np.median(residuals[keep]))))
+        limit = max(3.0, 3.0 * 1.4826 * (mad + 1e-6))
+        next_keep = np.abs(residuals) <= limit
+        if bool(np.array_equal(next_keep, keep)):
+            break
+        keep = next_keep
+    residuals = xs[keep] - (slope * ys[keep] + intercept) if int(np.sum(keep)) else xs - (slope * ys + intercept)
+    error = float(np.sqrt(np.mean(residuals**2))) if residuals.size else 0.0
+    return float(slope), float(intercept), error, keep
+
+
+def _build_segmented_taper_side(
+    side: str,
+    roi: Sequence[int],
+    trace_x: np.ndarray,
+    valid_mask: np.ndarray,
+    scanned_line_count: int,
+) -> TaperSideResult:
+    x1, y1, _x2, _y2 = [int(v) for v in roi]
+    valid_indices = np.flatnonzero(np.isfinite(trace_x) & valid_mask)
+    candidates = [
+        _candidate_from_trace_point(side, float(x1 + trace_x[idx]), float(y1 + idx), roi, int(idx))
+        for idx in valid_indices
+    ]
+    result = TaperSideResult(
+        side=side,
+        points=[(candidate.image_x, candidate.image_y) for candidate in candidates],
+        selected_boundary_candidates=list(candidates),
+        selected_point_count=len(candidates),
+        valid_point_count=len(candidates),
+        inlier_count=len(candidates),
+        fit_point_count=0,
+        scanned_line_count=scanned_line_count,
+        valid_scanline_count=len(candidates),
+        scanline_coverage=float(len(candidates) / scanned_line_count) if scanned_line_count else 0.0,
+        raw_edge_count=len(candidates),
+        raw_edge_candidates=list(candidates),
+        minimum_grayscale_delta=0.0,
+    )
+    if len(candidates) < max(12, int(scanned_line_count * 0.18)):
+        result.status = "Fail"
+        result.warning_message = f"{side} dark trench boundary not found"
+        return result
+
+    points = np.asarray(result.points, dtype=np.float64)
+    y_min = float(np.min(points[:, 1]))
+    y_max = float(np.max(points[:, 1]))
+    height = max(1.0, y_max - y_min)
+    fit_mask = (points[:, 1] >= y_min + height * 0.12) & (points[:, 1] <= y_min + height * 0.88)
+    fit_points = points[fit_mask]
+    if fit_points.shape[0] < 8:
+        fit_points = points
+    slope, intercept, error, keep = _robust_fit_x_by_y(fit_points)
+    inliers = fit_points[keep] if keep.size == fit_points.shape[0] and int(np.sum(keep)) >= 6 else fit_points
+    residuals_all = np.abs(points[:, 0] - (slope * points[:, 1] + intercept))
+    display_y_mask = (points[:, 1] >= y_min + height * 0.14) & (points[:, 1] <= y_min + height * 0.86)
+    display_limit = max(6.0, error * 3.0, (float(_x2 - x1) * 0.012))
+    display_mask = (residuals_all <= display_limit) & display_y_mask
+    if int(np.sum(display_mask)) >= max(12, int(scanned_line_count * 0.15)):
+        display_candidates = [candidate for candidate, keep_display in zip(candidates, display_mask) if bool(keep_display)]
+        result.points = [(candidate.image_x, candidate.image_y) for candidate in display_candidates]
+        result.selected_boundary_candidates = list(display_candidates)
+        result.selected_point_count = len(display_candidates)
+    fit_y_min = float(np.min(inliers[:, 1]))
+    fit_y_max = float(np.max(inliers[:, 1]))
+    fit_x_min = slope * fit_y_min + intercept
+    fit_x_max = slope * fit_y_max + intercept
+    result.fit_line = (fit_x_min, fit_y_min, fit_x_max, fit_y_max)
+    result.angle_horizontal, result.angle_vertical = _line_angles(fit_x_min, fit_y_min, fit_x_max, fit_y_max)
+    result.fit_error = error
+    result.fit_r2 = None
+    result.fit_point_count = int(inliers.shape[0])
+    result.inlier_count = int(inliers.shape[0])
+    coverage_score = result.scanline_coverage * 100.0
+    error_penalty = min(45.0, error * 7.0)
+    result.confidence = max(0.0, min(100.0, coverage_score - error_penalty + 12.0))
+    result.status = "OK" if result.confidence >= 70.0 else "Check"
+    if result.status != "OK":
+        result.warning_message = f"{side} dark trench boundary unstable"
+    return result
+
+
+def measure_dark_trench_side(gray: np.ndarray, roi: Sequence[int], side: str, settings: MeasurementSettings) -> TaperSideResult:
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    crop = np.asarray(gray[y1 : y2 + 1, x1 : x2 + 1], dtype=np.uint8)
+    if crop.size == 0 or crop.shape[0] < 24 or crop.shape[1] < 24:
+        result = TaperSideResult(side=side, status="Fail", warning_message=f"{side} taper ROI too small")
+        return result
+    h, w = crop.shape
+    center_band = crop[:, int(w * 0.35) : max(int(w * 0.65), int(w * 0.35) + 1)]
+    side_band = np.concatenate([crop[:, : max(1, int(w * 0.18))].ravel(), crop[:, int(w * 0.82) :].ravel()])
+    if center_band.size == 0 or side_band.size == 0 or float(np.median(center_band)) > float(np.median(side_band)) - 8.0:
+        return TaperSideResult(side=side, status="Fail", warning_message=f"{side} dark trench component not found")
+    processed = preprocess_target_roi(crop)
+    blurred, threshold = _dark_threshold(processed)
+    mask = blurred <= threshold
+    kernel = np.ones((3, 5), dtype=np.uint8)
+    mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel).astype(bool)
+    h, w = mask.shape
+    center_x = (w - 1) * 0.5
+    min_width = max(8, int(w * 0.05))
+    edge_margin = max(2, int(w * DARK_OBJECT_EDGE_MARGIN_RATIO))
+    left_values = np.full(h, np.nan, dtype=np.float64)
+    right_values = np.full(h, np.nan, dtype=np.float64)
+    valid = np.zeros(h, dtype=bool)
+    previous: Optional[tuple[int, int]] = None
+    for local_y in range(h):
+        interval = _select_central_dark_interval(mask[local_y, :], center_x, previous, min_width, edge_margin)
+        if interval is None:
+            continue
+        start, end = interval
+        left_values[local_y] = float(start)
+        right_values[local_y] = float(end)
+        valid[local_y] = True
+        previous = interval
+    if np.sum(valid) < max(12, int(h * 0.18)):
+        return TaperSideResult(side=side, status="Fail", warning_message=f"{side} dark trench component not found")
+    left_trace = _fill_smooth_trace(left_values)
+    right_trace = _fill_smooth_trace(right_values)
+    trace = left_trace if side == "left" else right_trace
+    return _build_segmented_taper_side(side, roi, trace, valid, h)
+
+
 def _fit_selected_boundary(
     result: TaperSideResult,
     selected: Sequence[RawEdgeCandidate],
@@ -400,6 +619,9 @@ def _fit_selected_boundary(
 
 
 def measure_taper_side(gray: np.ndarray, roi: Sequence[int], side: str, settings: MeasurementSettings) -> TaperSideResult:
+    segmented = measure_dark_trench_side(gray, roi, side, settings)
+    if segmented.status != "Fail":
+        return segmented
     scan, selected = LimitPeakBoundaryEngine(settings).scan(gray, roi, side)
     result = _result_with_scan_metadata(side, scan)
     return _fit_selected_boundary(result, selected, roi, settings)
