@@ -18,6 +18,7 @@ class ImageViewer(ctk.CTkFrame):
         on_overlay_toggled: Callable[[bool], None],
         on_hover_profile: Optional[Callable[[Optional[int], Optional[int]], None]] = None,
         on_manual_points: Optional[Callable[[list[Tuple[int, int]]], None]] = None,
+        on_clear_measurement: Optional[Callable[[], None]] = None,
         language: str = "ko",
         **kwargs,
     ):
@@ -26,6 +27,7 @@ class ImageViewer(ctk.CTkFrame):
         self.on_overlay_toggled = on_overlay_toggled
         self.on_hover_profile = on_hover_profile
         self.on_manual_points = on_manual_points
+        self.on_clear_measurement = on_clear_measurement
         self.language = language
 
         self.title_var = tk.StringVar(value=t(self.language, "viewer_title"))
@@ -49,6 +51,7 @@ class ImageViewer(ctk.CTkFrame):
         self.drag_item: Optional[int] = None
         self.manual_points: list[Tuple[int, int]] = []
         self.manual_point_count = 2
+        self.manual_measurement_type = ""
         self.manual_items: list[int] = []
         self._content_image_id = None
         self._last_render_state = None
@@ -76,12 +79,13 @@ class ImageViewer(ctk.CTkFrame):
 
         controls = ctk.CTkFrame(self, fg_color="#0a121b")
         controls.pack(fill="x", padx=12, pady=(0, 10))
-        self.roi_button = ctk.CTkButton(controls, text="ROI", width=54, command=lambda: self.set_mode("roi"))
+        primary_button_width = 76
+        self.roi_button = ctk.CTkButton(controls, text="ROI", width=primary_button_width, command=lambda: self.set_mode("roi"))
         self.roi_button.pack(side="left", padx=(8, 4), pady=8)
         self.manual_button = ctk.CTkButton(
             controls,
             text=t(self.language, "manual_mode"),
-            width=76,
+            width=primary_button_width,
             fg_color="#142234",
             command=lambda: self.set_mode("manual"),
         )
@@ -89,9 +93,9 @@ class ImageViewer(ctk.CTkFrame):
         self.manual_clear_button = ctk.CTkButton(
             controls,
             text=t(self.language, "manual_clear"),
-            width=64,
+            width=primary_button_width,
             fg_color="#142234",
-            command=self.clear_manual_points,
+            command=self.clear_measurement_marks,
         )
         self.manual_clear_button.pack(side="left", padx=4, pady=8)
         ctk.CTkButton(controls, text="-", width=38, fg_color="#142234", command=self.zoom_out).pack(side="left", padx=4, pady=8)
@@ -111,11 +115,13 @@ class ImageViewer(ctk.CTkFrame):
         self.manual_button.configure(fg_color="#1f6aa5" if clean_mode == "manual" else "#142234")
         self._update_manual_status()
 
-    def set_manual_point_count(self, count: int) -> None:
+    def set_manual_point_count(self, count: int, measurement_type: str = "") -> None:
         next_count = max(2, int(count))
-        if next_count == self.manual_point_count:
+        next_type = measurement_type or self.manual_measurement_type
+        if next_count == self.manual_point_count and next_type == self.manual_measurement_type:
             return
         self.manual_point_count = next_count
+        self.manual_measurement_type = next_type
         self.clear_manual_points()
 
     def set_content(self, image_bgr, render_bgr, title: str, meta: str, status: str) -> None:
@@ -209,6 +215,15 @@ class ImageViewer(ctk.CTkFrame):
         self.manual_items = []
         self._update_manual_status()
 
+    def clear_measurement_marks(self) -> None:
+        self.clear_manual_points()
+        if self.drag_item:
+            self.canvas.delete(self.drag_item)
+            self.drag_item = None
+        self.drag_start_canvas = None
+        if self.on_clear_measurement is not None:
+            self.on_clear_measurement()
+
     def _image_to_canvas(self, point: Tuple[int, int]) -> Tuple[int, int]:
         return int(round(self.offset_x + point[0] * self.scale)), int(round(self.offset_y + point[1] * self.scale))
 
@@ -219,11 +234,39 @@ class ImageViewer(ctk.CTkFrame):
         if not self.manual_points:
             return
         canvas_points = [self._image_to_canvas(point) for point in self.manual_points]
-        if len(canvas_points) >= 2:
-            self.manual_items.append(self.canvas.create_line(*canvas_points, fill="#ffde59", width=2, dash=(5, 3)))
+        for p1, p2 in self._manual_line_segments(canvas_points):
+            self.manual_items.append(self.canvas.create_line(*p1, *p2, fill="#ffde59", width=2, dash=(5, 3)))
         for idx, (x, y) in enumerate(canvas_points, start=1):
             self.manual_items.append(self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline="#101820", fill="#ffde59", width=2))
             self.manual_items.append(self.canvas.create_text(x + 10, y - 10, text=str(idx), fill="#fffbdf", anchor="w"))
+
+    def _manual_line_segments(self, canvas_points: list[Tuple[int, int]]) -> list[tuple[Tuple[int, int], Tuple[int, int]]]:
+        mode = self.manual_measurement_type
+        segments: list[tuple[Tuple[int, int], Tuple[int, int]]] = []
+
+        def horizontal(p1: Tuple[int, int], p2: Tuple[int, int]) -> tuple[Tuple[int, int], Tuple[int, int]]:
+            y = int(round((p1[1] + p2[1]) * 0.5))
+            return (p1[0], y), (p2[0], y)
+
+        def vertical(p1: Tuple[int, int], p2: Tuple[int, int]) -> tuple[Tuple[int, int], Tuple[int, int]]:
+            x = int(round((p1[0] + p2[0]) * 0.5))
+            return (x, p1[1]), (x, p2[1])
+
+        if len(canvas_points) >= 2:
+            if mode == "distance_horizontal":
+                segments.append(horizontal(canvas_points[0], canvas_points[1]))
+            elif mode == "distance_vertical":
+                segments.append(vertical(canvas_points[0], canvas_points[1]))
+            elif mode in {"distance_both", "hole_cd", "crater"}:
+                segments.append(horizontal(canvas_points[0], canvas_points[1]))
+            else:
+                segments.append((canvas_points[0], canvas_points[1]))
+        if len(canvas_points) >= 4:
+            if mode in {"distance_both", "hole_cd", "crater"}:
+                segments.append(vertical(canvas_points[2], canvas_points[3]))
+            elif mode == "taper_double":
+                segments.append((canvas_points[2], canvas_points[3]))
+        return segments
 
     def _is_canvas_inside_image(self, x: int, y: int) -> bool:
         return (

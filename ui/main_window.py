@@ -137,6 +137,7 @@ class MainWindow(ctk.CTk):
             on_overlay_toggled=self.on_overlay_toggled,
             on_hover_profile=self.on_profile_hover,
             on_manual_points=self.on_manual_points,
+            on_clear_measurement=self.on_clear_measurement_marks,
             language=self.language,
         )
         self.viewer.grid(row=0, column=0, sticky="nsew")
@@ -398,7 +399,7 @@ class MainWindow(ctk.CTk):
         meta = f"{display_measurement_label} | {self._settings_source_label(settings.settings_source)}"
         self.current_file_var.set(item.file_name)
         self.viewer.set_content(self.current_image, rendered, title, meta, status)
-        self.viewer.set_manual_point_count(required_manual_points(settings.measurement_type))
+        self.viewer.set_manual_point_count(required_manual_points(settings.measurement_type), settings.measurement_type)
         self.profile_graph.set_context(self.current_image, settings, item.result)
         self._profile_image_path = item.image_path
         if update_option_settings:
@@ -765,6 +766,23 @@ class MainWindow(ctk.CTk):
         self.refresh_thumbnail_panel()
         self.refresh_result_table()
         self.set_status(t(self.language, "manual_measurement_complete").format(file_name=item.file_name))
+
+    def on_clear_measurement_marks(self) -> None:
+        item = self.current_item()
+        if item is None:
+            return
+        self._cancel_auto_measure()
+        settings = self._ensure_item_settings(item, "image_specific")
+        settings.roi = None
+        settings.roi_source_image = ""
+        item.result = None
+        self.render_cache.clear()
+        self.thumbnail_overlay_cache.clear()
+        self._last_measured_settings = None
+        self.render_current_image()
+        self.refresh_thumbnail_panel()
+        self.refresh_result_table()
+        self.set_status(t(self.language, "manual_clear"))
 
     def _targets_for_scope(self, scope: str) -> List[ImageItem]:
         item = self.current_item()
