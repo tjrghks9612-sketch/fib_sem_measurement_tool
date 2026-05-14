@@ -7,6 +7,7 @@ from typing import Sequence
 import cv2
 import numpy as np
 
+from fib_sem_measurement_tool.core.target_preprocessing import preprocess_target_roi
 from fib_sem_measurement_tool.models.result import HoleCDResult, MeasurementResult, MeasurementStatus
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -174,6 +175,37 @@ def _smooth_circular(values: np.ndarray, window: int = 5) -> np.ndarray:
     return np.convolve(padded, kernel, mode="valid")
 
 
+def _despike_circular(values: np.ndarray, window: int = 13, z_limit: float = 3.5) -> tuple[np.ndarray, int]:
+    if values.size == 0:
+        return values, 0
+    pad = max(1, int(window) // 2)
+    padded = np.concatenate([values[-pad:], values, values[:pad]])
+    local = np.empty_like(values, dtype=np.float64)
+    for idx in range(values.size):
+        local[idx] = float(np.median(padded[idx : idx + pad * 2 + 1]))
+    residual = values - local
+    mad = float(np.median(np.abs(residual - np.median(residual))))
+    limit = max(2.5, float(z_limit) * 1.4826 * (mad + 1e-6))
+    keep = np.abs(residual) <= limit
+    cleaned = values.copy()
+    cleaned[~keep] = np.nan
+    cleaned = _interp_circular(cleaned)
+    return cleaned, int(np.sum(~keep))
+
+
+def _gaussian_smooth_circular(values: np.ndarray, window: int = 17, sigma: float = 3.0) -> np.ndarray:
+    if values.size == 0 or window <= 1:
+        return values
+    if window % 2 == 0:
+        window += 1
+    radius = window // 2
+    x = np.arange(-radius, radius + 1, dtype=np.float64)
+    kernel = np.exp(-(x**2) / (2.0 * sigma * sigma))
+    kernel /= np.sum(kernel)
+    padded = np.concatenate([values[-radius:], values, values[:radius]])
+    return np.convolve(padded, kernel, mode="valid")
+
+
 def _score_track(radii: np.ndarray, strengths: np.ndarray, max_radius: int) -> HoleBoundaryTrack:
     valid = np.isfinite(radii)
     coverage = float(valid.mean()) if valid.size else 0.0
@@ -182,7 +214,8 @@ def _score_track(radii: np.ndarray, strengths: np.ndarray, max_radius: int) -> H
     finite = filled[np.isfinite(filled)]
     if finite.size == 0:
         return HoleBoundaryTrack(radii, strengths, warnings=["no_valid_hole_boundary"])
-    smoothed = _smooth_circular(filled, 5)
+    cleaned, outlier_count = _despike_circular(filled, 17, 2.8)
+    smoothed = _gaussian_smooth_circular(cleaned, 25, 4.2)
     deltas = np.abs(np.diff(np.concatenate([smoothed, smoothed[:1]])))
     mean_radius = float(np.mean(finite))
     radius_std = float(np.std(finite))
@@ -203,6 +236,8 @@ def _score_track(radii: np.ndarray, strengths: np.ndarray, max_radius: int) -> H
         warnings.append("low_edge_strength")
     if radius_cv > 0.32:
         warnings.append("possible_inner_stain_detected")
+    if outlier_count > radii.size * 0.08:
+        warnings.append("radius_outliers_interpolated")
     score = (
         coverage * 45.0
         + min(mean_strength / 35.0, 1.0) * 20.0
@@ -373,13 +408,18 @@ def _result_from_track(track: HoleBoundaryTrack, contour: np.ndarray, center: tu
 
 
 def measure_hole_cd(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSettings) -> MeasurementResult:
-    center = _refine_center(gray, roi)
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    work_gray = gray.astype(np.uint8, copy=True)
+    roi_gray = work_gray[y1 : y2 + 1, x1 : x2 + 1]
+    processed_roi = preprocess_target_roi(roi_gray)
+    work_gray[y1 : y2 + 1, x1 : x2 + 1] = cv2.addWeighted(roi_gray, 0.70, processed_roi, 0.30, 0)
+    center = _refine_center(work_gray, roi)
     max_radius = _max_radius_to_roi(center[0], center[1], roi)
     target = getattr(settings, "hole_target", "inner")
     if max_radius < 12:
         hole = HoleCDResult(target=target, status=MeasurementStatus.FAIL.value, warning_message="roi_too_small")
         return MeasurementResult(measurement_type="hole_cd", hole_cd=hole, overall_confidence=0.0, status=MeasurementStatus.FAIL.value)
-    polar = _polar_image(gray, center, max_radius, ANGLE_SAMPLES)
+    polar = _polar_image(work_gray, center, max_radius, ANGLE_SAMPLES)
     candidates = _extract_candidates(polar, settings)
     tracks = _build_tracks(candidates, max_radius)
     valid_tracks = [

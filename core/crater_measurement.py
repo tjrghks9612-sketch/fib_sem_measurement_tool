@@ -6,6 +6,7 @@ from typing import List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
+from fib_sem_measurement_tool.core.target_preprocessing import preprocess_target_roi
 from fib_sem_measurement_tool.models.result import CraterResult, MeasurementResult, MeasurementStatus
 from fib_sem_measurement_tool.models.settings import MeasurementSettings
 
@@ -124,6 +125,109 @@ def _extract_top_profile(grad_y: np.ndarray, baseline_y: np.ndarray, limit: floa
     return top_y, strengths, valid
 
 
+def _dark_object_threshold(values: np.ndarray) -> float:
+    if values.size == 0:
+        return 0.0
+    source = values.astype(np.uint8, copy=False).reshape(-1, 1)
+    otsu, _binary = cv2.threshold(source, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return min(float(otsu), float(np.percentile(values, 38.0)))
+
+
+def _segments(mask_line: np.ndarray) -> list[tuple[int, int]]:
+    result: list[tuple[int, int]] = []
+    start: Optional[int] = None
+    for idx, value in enumerate(mask_line):
+        if bool(value) and start is None:
+            start = idx
+        elif not bool(value) and start is not None:
+            result.append((start, idx - 1))
+            start = None
+    if start is not None:
+        result.append((start, len(mask_line) - 1))
+    return result
+
+
+def _dark_profile_from_baseline(blurred: np.ndarray, baseline_y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    h, w = blurred.shape
+    samples = []
+    top_limit = int(max(1, h * 0.06))
+    for x in range(w):
+        bottom = int(min(h - 1, max(top_limit + 2, baseline_y[x] - 2)))
+        if bottom > top_limit:
+            samples.append(blurred[top_limit:bottom, x])
+    if not samples:
+        return np.full(w, np.nan, dtype=np.float32), np.zeros(w, dtype=bool), np.zeros_like(blurred, dtype=bool)
+    threshold = _dark_object_threshold(np.concatenate(samples))
+    mask = blurred <= threshold
+    mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8)).astype(bool)
+    top_y = np.full(w, np.nan, dtype=np.float32)
+    valid = np.zeros(w, dtype=bool)
+    for x in range(w):
+        bottom = int(min(h - 1, max(top_limit + 2, baseline_y[x] - 3)))
+        line = mask[top_limit:bottom, x]
+        if line.size < 5:
+            continue
+        candidates = []
+        for start, end in _segments(line):
+            segment_height = end - start + 1
+            distance_to_baseline = (line.size - 1) - end
+            if segment_height < 4 or distance_to_baseline > max(12, int(h * 0.04)):
+                continue
+            candidates.append((segment_height - distance_to_baseline * 2.0, start, end))
+        if not candidates:
+            continue
+        _score, start, _end = max(candidates, key=lambda item: item[0])
+        top_y[x] = float(top_limit + start)
+        valid[x] = True
+    if np.sum(valid) >= 3:
+        indexes = np.arange(w, dtype=np.float32)
+        filled = top_y.copy()
+        filled[~valid] = np.interp(indexes[~valid], indexes[valid], top_y[valid])
+        top_y = _moving_median(filled, 13)
+    return top_y, valid, mask
+
+
+def _extract_side_boundaries(
+    dark_mask: np.ndarray,
+    top_y: np.ndarray,
+    baseline_y: np.ndarray,
+    left: int,
+    right: int,
+) -> tuple[list[Point], list[Point]]:
+    h, w = dark_mask.shape
+    if right <= left:
+        return [], []
+    finite_top = top_y[left : right + 1][np.isfinite(top_y[left : right + 1])]
+    if finite_top.size == 0:
+        return [], []
+    y_start = max(0, int(np.floor(np.min(finite_top))))
+    y_end = min(h - 1, int(np.ceil(np.median(baseline_y[left : right + 1]))))
+    center = (left + right) * 0.5
+    previous = (left, right)
+    left_points: list[Point] = []
+    right_points: list[Point] = []
+    for y in range(y_start, y_end + 1):
+        row = dark_mask[y, :]
+        candidates = []
+        for start, end in _segments(row):
+            width = end - start + 1
+            if width < max(6, int(w * 0.015)) or width > int(w * 0.90):
+                continue
+            overlap = max(0, min(end, previous[1]) - max(start, previous[0]) + 1)
+            midpoint = (start + end) * 0.5
+            if overlap <= 0 and abs(midpoint - center) > (right - left) * 0.62:
+                continue
+            score = width + overlap * 2.0 - abs(midpoint - center) * 0.2
+            candidates.append((score, start, end))
+        if not candidates:
+            continue
+        _score, start, end = max(candidates, key=lambda item: item[0])
+        previous = (start, end)
+        left_points.append((float(start), float(y)))
+        right_points.append((float(end), float(y)))
+    return left_points, right_points
+
+
 def _largest_height_region(heights: np.ndarray) -> Optional[tuple[int, int]]:
     finite = np.isfinite(heights)
     if not np.any(finite):
@@ -207,7 +311,8 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
     if crop.size == 0 or crop.shape[0] < 40 or crop.shape[1] < 60:
         return _empty_result("crater_roi_too_small")
 
-    blurred = cv2.GaussianBlur(crop.astype(np.uint8), (5, 5), 0)
+    processed = preprocess_target_roi(crop.astype(np.uint8))
+    blurred = cv2.GaussianBlur(processed, (5, 5), 0)
     grad_y = np.abs(cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3))
     h, w = grad_y.shape
     limit = float(getattr(settings, "minimum_grayscale_delta", 55.0))
@@ -219,13 +324,26 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
 
     xs = np.arange(w, dtype=np.float32)
     baseline_y = np.asarray(_baseline_value(slope, intercept, xs), dtype=np.float32)
-    top_y, strengths, valid = _extract_top_profile(grad_y, baseline_y, limit)
+    scan_origin = getattr(settings, "crater_scan_origin", "auto")
+    top_y, valid, dark_mask = _dark_profile_from_baseline(blurred, baseline_y)
+    strengths = np.zeros(w, dtype=np.float32)
+    for idx in np.flatnonzero(valid):
+        yy = int(max(0, min(h - 1, round(float(top_y[idx])))))
+        strengths[idx] = float(grad_y[yy, idx])
+    if not np.any(valid) and scan_origin in {"auto", "from_top"}:
+        top_y, strengths, valid = _extract_top_profile(grad_y, baseline_y, limit)
+        dark_mask = blurred <= np.percentile(blurred, 40.0)
     if not np.any(valid):
         return _empty_result("crater_top_profile_not_found")
 
     heights = baseline_y - top_y
     heights[~np.isfinite(heights)] = np.nan
-    region = _largest_height_region(heights)
+    region_heights = heights.copy()
+    finite_region_heights = region_heights[np.isfinite(region_heights)]
+    if finite_region_heights.size:
+        low_height_cutoff = max(5.0, float(np.nanmax(finite_region_heights)) * 0.20)
+        region_heights[(~valid) & (region_heights < low_height_cutoff)] = np.nan
+    region = _largest_height_region(region_heights)
     if region is None:
         return _empty_result("crater_left_foot_not_found;crater_right_foot_not_found")
     left, right = region
@@ -233,6 +351,9 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
         return _empty_result("crater_profile_coverage_low")
 
     top_profile_points = [(float(x1 + x), float(y1 + top_y[x])) for x in range(left, right + 1) if np.isfinite(top_y[x])]
+    left_boundary_local, right_boundary_local = _extract_side_boundaries(dark_mask, top_y, baseline_y, left, right)
+    left_boundary_points = [(float(x1 + x), float(y1 + y)) for x, y in left_boundary_local]
+    right_boundary_points = [(float(x1 + x), float(y1 + y)) for x, y in right_boundary_local]
     coverage = float(len(top_profile_points) / max(1, right - left + 1) * 100.0)
     smoothness = _profile_smoothness(top_y, left, right)
     max_height = float(np.nanmax(heights[left : right + 1]))
@@ -266,16 +387,16 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
 
     lower_ratio = 0.10
     upper_ratio = 0.80
-    normalized_height = heights / max(max_height, 1.0)
+    baseline_median = float(np.median(baseline_y[left : right + 1]))
     left_points = [
-        (float(x1 + x), float(y1 + top_y[x]))
-        for x in range(left, center_local + 1)
-        if np.isfinite(top_y[x]) and lower_ratio <= normalized_height[x] <= upper_ratio
+        (x, y)
+        for x, y in left_boundary_points
+        if lower_ratio <= (float(y1 + baseline_median) - y) / max(max_height, 1.0) <= upper_ratio
     ]
     right_points = [
-        (float(x1 + x), float(y1 + top_y[x]))
-        for x in range(center_local, right + 1)
-        if np.isfinite(top_y[x]) and lower_ratio <= normalized_height[x] <= upper_ratio
+        (x, y)
+        for x, y in right_boundary_points
+        if lower_ratio <= (float(y1 + baseline_median) - y) / max(max_height, 1.0) <= upper_ratio
     ]
     left_fit = _fit_taper(left_points)
     right_fit = _fit_taper(right_points)
@@ -359,6 +480,8 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
         status=status,
         warning_message=";".join(warnings),
         top_profile_points=top_profile_points,
+        left_boundary_points=left_boundary_points,
+        right_boundary_points=right_boundary_points,
         baseline_line=(float(x1 + left), float(y1 + baseline_y[left]), float(x1 + right), float(y1 + baseline_y[right])),
         cd_line=(left_foot[0], left_foot[1], right_foot[0], right_foot[1]),
         thk_line=(center_x, baseline_center, center_x, top_center),

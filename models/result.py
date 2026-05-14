@@ -268,6 +268,8 @@ class CraterResult:
     status: str = "Fail"
     warning_message: str = ""
     top_profile_points: List[Tuple[float, float]] = field(default_factory=list)
+    left_boundary_points: List[Tuple[float, float]] = field(default_factory=list)
+    right_boundary_points: List[Tuple[float, float]] = field(default_factory=list)
     baseline_line: Optional[Tuple[float, float, float, float]] = None
     cd_line: Optional[Tuple[float, float, float, float]] = None
     thk_line: Optional[Tuple[float, float, float, float]] = None

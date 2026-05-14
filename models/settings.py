@@ -64,6 +64,8 @@ class MeasurementSettings:
     measurement_type: str = "distance_both"
     measure_direction: str = "both"
     hole_target: str = "inner"
+    crater_object_polarity: str = "dark_object"
+    crater_scan_origin: str = "auto"
     taper_side: str = "left"
     distance_method: str = "mean"
     edge_scan_mode: str = "auto"

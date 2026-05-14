@@ -16,6 +16,7 @@ if str(PACKAGE_ROOT) not in sys.path:
 
 from fib_sem_measurement_tool.core.measurement_runner import run_measurement
 from fib_sem_measurement_tool.core.overlay import draw_overlay
+from fib_sem_measurement_tool.core.target_preprocessing import preprocess_target_roi
 from fib_sem_measurement_tool.export.csv_exporter import CSV_COLUMNS, make_result_row
 from fib_sem_measurement_tool.models.image_item import ImageItem
 from fib_sem_measurement_tool.models.result import MeasurementResult
@@ -25,6 +26,7 @@ from fib_sem_measurement_tool.models.settings import MeasurementSettings
 SAMPLE_DIR = Path(r"C:\Users\admin\Downloads\fib_sem_raw_samples")
 OUTPUT_DIR = ROOT / "validation_outputs"
 OVERLAY_DIR = OUTPUT_DIR / "overlays"
+TARGET_OVERLAY_DIR = OUTPUT_DIR / "target_overlays"
 
 
 Roi = Tuple[int, int, int, int]
@@ -81,6 +83,77 @@ def write_image(path: Path, image) -> bool:
         return False
     encoded.tofile(str(path))
     return True
+
+
+def _blend_mask(image: np.ndarray, mask: np.ndarray, color: tuple[int, int, int], alpha: float = 0.26) -> np.ndarray:
+    out = image.copy()
+    overlay = out.copy()
+    overlay[mask.astype(bool)] = color
+    cv2.addWeighted(overlay, alpha, out, 1.0 - alpha, 0, out)
+    return out
+
+
+def _draw_trace(image: np.ndarray, points, color: tuple[int, int, int], thickness: int = 2) -> None:
+    if not points:
+        return
+    pts = np.asarray(points, dtype=np.int32).reshape(-1, 1, 2)
+    cv2.polylines(image, [pts], False, (8, 10, 14), thickness + 3, cv2.LINE_AA)
+    cv2.polylines(image, [pts], False, color, thickness, cv2.LINE_AA)
+
+
+def _target_overlay(image: np.ndarray, roi: Roi, result: MeasurementResult, settings: MeasurementSettings):
+    canvas = image.copy()
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    cv2.rectangle(canvas, (x1, y1), (x2, y2), (90, 190, 255), 1, cv2.LINE_AA)
+    crop = image[y1 : y2 + 1, x1 : x2 + 1]
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+
+    if settings.measurement_type == "hole_cd" and result.hole_cd and result.hole_cd.contour_points:
+        pts = np.asarray(result.hole_cd.contour_points, dtype=np.int32).reshape(-1, 1, 2)
+        cv2.polylines(canvas, [pts], True, (8, 10, 14), 5, cv2.LINE_AA)
+        cv2.polylines(canvas, [pts], True, (45, 190, 255), 2, cv2.LINE_AA)
+        return canvas
+
+    if settings.measurement_type == "taper_double":
+        processed = preprocess_target_roi(gray)
+        _otsu, mask = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 5), dtype=np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8)).astype(bool)
+        roi_view = canvas[y1 : y2 + 1, x1 : x2 + 1]
+        canvas[y1 : y2 + 1, x1 : x2 + 1] = _blend_mask(roi_view, mask, (45, 190, 255), 0.18)
+        if result.left_taper:
+            _draw_trace(canvas, result.left_taper.points, (45, 190, 255), 2)
+        if result.right_taper:
+            _draw_trace(canvas, result.right_taper.points, (255, 150, 96), 2)
+        return canvas
+
+    if settings.measurement_type == "crater" and result.crater:
+        crater = result.crater
+        if crater.top_profile_points and crater.baseline_line:
+            top_points = sorted(((float(x), float(y)) for x, y in crater.top_profile_points), key=lambda item: item[0])
+            bx1, by1, bx2, by2 = crater.baseline_line
+            denom = float(bx2 - bx1)
+            if abs(denom) > 1e-6:
+                bottom_points = [
+                    (
+                        int(round(x)),
+                        int(round(float(by1) + (float(by2) - float(by1)) * ((float(x) - float(bx1)) / denom))),
+                    )
+                    for x, _y in reversed(top_points)
+                ]
+                polygon = np.asarray(
+                    [(int(round(x)), int(round(y))) for x, y in top_points] + bottom_points,
+                    dtype=np.int32,
+                ).reshape(-1, 1, 2)
+                overlay = canvas.copy()
+                cv2.fillPoly(overlay, [polygon], (80, 205, 255), cv2.LINE_AA)
+                cv2.addWeighted(overlay, 0.22, canvas, 0.78, 0, canvas)
+        _draw_trace(canvas, crater.top_profile_points, (80, 205, 255), 2)
+        _draw_trace(canvas, crater.left_boundary_points, (255, 214, 92), 2)
+        _draw_trace(canvas, crater.right_boundary_points, (255, 150, 96), 2)
+        return canvas
+
+    return None
 
 
 def _settings_for(spec: SampleSpec, roi: Roi) -> MeasurementSettings:
@@ -192,6 +265,7 @@ def write_report(entries: Iterable[Dict[str, object]]) -> None:
                 f"- status: {entry['status']}",
                 f"- warning_message: {entry['warning_message'] or '-'}",
                 f"- overlay_path: {entry['overlay_path']}",
+                f"- target_overlay_path: {entry.get('target_overlay_path') or '-'}",
                 f"- validation: {entry['validation']}",
                 f"- failure_reason: {entry['failure_reason'] or '-'}",
                 "",
@@ -203,6 +277,7 @@ def write_report(entries: Iterable[Dict[str, object]]) -> None:
 def main() -> int:
     OUTPUT_DIR.mkdir(exist_ok=True)
     OVERLAY_DIR.mkdir(exist_ok=True)
+    TARGET_OVERLAY_DIR.mkdir(exist_ok=True)
     rows = []
     report_entries = []
     for spec in SAMPLES:
@@ -217,6 +292,11 @@ def main() -> int:
         overlay = draw_overlay(image, roi, result, settings, show_overlay=True, language="ko")
         overlay_path = OVERLAY_DIR / f"{image_path.stem}_overlay.png"
         write_image(overlay_path, overlay)
+        target_overlay_path: Optional[Path] = None
+        target_overlay = _target_overlay(image, roi, result, settings)
+        if target_overlay is not None:
+            target_overlay_path = TARGET_OVERLAY_DIR / f"{image_path.stem}_target.png"
+            write_image(target_overlay_path, target_overlay)
 
         item = ImageItem(
             image_path=str(image_path),
@@ -237,6 +317,7 @@ def main() -> int:
                 "status": result.status,
                 "warning_message": result.warning_message,
                 "overlay_path": str(overlay_path.relative_to(ROOT)).replace("\\", "/"),
+                "target_overlay_path": str(target_overlay_path.relative_to(ROOT)).replace("\\", "/") if target_overlay_path else "",
                 "validation": validation,
                 "failure_reason": reason,
             }

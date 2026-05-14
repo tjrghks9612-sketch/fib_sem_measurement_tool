@@ -282,7 +282,8 @@ class LimitPeakBoundaryEngine:
             horizontal = measure_horizontal_cd(gray, roi, self.settings)
             results["horizontal"] = horizontal
         if direction in {"vertical", "both"}:
-            results["vertical"] = measure_vertical_thk(gray, roi, self.settings, horizontal)
+            cd_reference = None if direction == "both" else horizontal
+            results["vertical"] = measure_vertical_thk(gray, roi, self.settings, cd_reference)
         return results
 
 
