@@ -7,6 +7,7 @@ import numpy as np
 
 from fib_sem_measurement_tool.models.result import (
     DistanceResult,
+    CraterResult,
     MeasurementResult,
     MeasurementStatus,
     PairCandidate,
@@ -20,7 +21,9 @@ Point = Tuple[float, float]
 
 
 def required_manual_points(measurement_type: str) -> int:
-    return 4 if measurement_type == "taper_double" else 2
+    if measurement_type in {"distance_both", "hole_cd", "crater", "taper_double"}:
+        return 4
+    return 2
 
 
 def _candidate(point: Point, scan_axis: str, scan_index: int, position: float) -> RawEdgeCandidate:
@@ -45,14 +48,18 @@ def _distance_result(p1: Point, p2: Point, orientation: str, method: str) -> Dis
         value = abs(float(p2[0]) - float(p1[0]))
         scan_axis = "x"
         scan_index = int(round((float(p1[1]) + float(p2[1])) * 0.5))
-        first = _candidate(p1, scan_axis, scan_index, p1[0])
-        second = _candidate(p2, scan_axis, scan_index, p2[0])
+        constrained_p1 = (float(p1[0]), float(scan_index))
+        constrained_p2 = (float(p2[0]), float(scan_index))
+        first = _candidate(constrained_p1, scan_axis, scan_index, constrained_p1[0])
+        second = _candidate(constrained_p2, scan_axis, scan_index, constrained_p2[0])
     else:
         value = abs(float(p2[1]) - float(p1[1]))
         scan_axis = "y"
         scan_index = int(round((float(p1[0]) + float(p2[0])) * 0.5))
-        first = _candidate(p1, scan_axis, scan_index, p1[1])
-        second = _candidate(p2, scan_axis, scan_index, p2[1])
+        constrained_p1 = (float(scan_index), float(p1[1]))
+        constrained_p2 = (float(scan_index), float(p2[1]))
+        first = _candidate(constrained_p1, scan_axis, scan_index, constrained_p1[1])
+        second = _candidate(constrained_p2, scan_axis, scan_index, constrained_p2[1])
 
     if second.position < first.position:
         first, second = second, first
@@ -132,6 +139,113 @@ def _ordered_points(points: Sequence[Point]) -> list[Point]:
     return [(float(x), float(y)) for x, y in points]
 
 
+def _selected_pair_points(result: DistanceResult) -> tuple[Point, Point]:
+    pair = result.selected_pair or result.selected_pairs[0]
+    return (pair.first.image_x, pair.first.image_y), (pair.second.image_x, pair.second.image_y)
+
+
+def _manual_hole_result(horizontal_result: DistanceResult, vertical_result: DistanceResult, settings: MeasurementSettings) -> HoleCDResult:
+    h1, h2 = _selected_pair_points(horizontal_result)
+    v1, v2 = _selected_pair_points(vertical_result)
+    horizontal = float(horizontal_result.selected_px or 0.0)
+    vertical = float(vertical_result.selected_px or 0.0)
+    cx = (float(h1[0]) + float(h2[0])) * 0.5
+    cy = (float(v1[1]) + float(v2[1])) * 0.5
+    rx = max(horizontal * 0.5, 1.0)
+    ry = max(vertical * 0.5, 1.0)
+    contour = [
+        (cx + rx * math.cos(theta), cy + ry * math.sin(theta))
+        for theta in np.linspace(0.0, 2.0 * math.pi, 180, endpoint=False)
+    ]
+    area = math.pi * rx * ry
+    perimeter = math.pi * (3 * (rx + ry) - math.sqrt((3 * rx + ry) * (rx + 3 * ry)))
+    return HoleCDResult(
+        target=getattr(settings, "hole_target", "inner"),
+        horizontal_px=horizontal,
+        vertical_px=vertical,
+        min_feret_px=min(horizontal, vertical),
+        max_feret_px=max(horizontal, vertical),
+        equivalent_diameter_px=math.sqrt(4.0 * area / math.pi),
+        area_px=area,
+        perimeter_px=perimeter,
+        coverage=1.0,
+        mean_radius=(rx + ry) * 0.5,
+        radius_std=abs(rx - ry) * 0.5,
+        mean_strength=1.0,
+        smoothness=0.0,
+        continuity=1.0,
+        confidence=100.0,
+        status=MeasurementStatus.OK.value,
+        contour_points=contour,
+        center=(cx, cy),
+        ellipse_major_px=max(horizontal, vertical),
+        ellipse_minor_px=min(horizontal, vertical),
+        ellipse_angle_deg=0.0,
+        ellipse_fit_error=0.0,
+        ellipse_aspect_ratio=(max(horizontal, vertical) / max(min(horizontal, vertical), 1e-6)),
+    )
+
+
+def _manual_crater_result(horizontal_result: DistanceResult, vertical_result: DistanceResult, settings: MeasurementSettings) -> CraterResult:
+    h1, h2 = _selected_pair_points(horizontal_result)
+    v1, v2 = _selected_pair_points(vertical_result)
+    left, right = (h1, h2) if h1[0] <= h2[0] else (h2, h1)
+    top, bottom = (v1, v2) if v1[1] <= v2[1] else (v2, v1)
+    cd_px = float(horizontal_result.selected_px or 0.0)
+    thk_px = float(vertical_result.selected_px or 0.0)
+    px_to_real = float(settings.calibration.px_to_real or 1.0)
+    center_x = float(top[0])
+    baseline_y = float(left[1])
+    side_height = max(thk_px, 1.0)
+    left_boundary = [(float(left[0]), baseline_y), (float(left[0]), baseline_y - side_height * 0.5)]
+    right_boundary = [(float(right[0]), baseline_y), (float(right[0]), baseline_y - side_height * 0.5)]
+    top_profile = [(float(left[0]), float(top[1])), (center_x, float(top[1])), (float(right[0]), float(top[1]))]
+    return CraterResult(
+        cd_px=cd_px,
+        cd=cd_px * px_to_real,
+        thk_px=thk_px,
+        thk=thk_px * px_to_real,
+        thk_mean_px=thk_px,
+        thk_max_px=thk_px,
+        thk_min_px=thk_px,
+        thk_median_px=thk_px,
+        left_foot_x=float(left[0]),
+        left_foot_y=baseline_y,
+        right_foot_x=float(right[0]),
+        right_foot_y=baseline_y,
+        baseline_y_left=baseline_y,
+        baseline_y_right=baseline_y,
+        baseline_slope=0.0,
+        baseline_intercept=baseline_y,
+        baseline_confidence=100.0,
+        baseline_status=MeasurementStatus.OK.value,
+        center_x=center_x,
+        top_y_at_center=float(top[1]),
+        baseline_y_at_center=baseline_y,
+        top_profile_point_count=len(top_profile),
+        top_profile_valid_count=len(top_profile),
+        top_profile_coverage=1.0,
+        top_profile_smoothness=0.0,
+        top_profile_confidence=100.0,
+        top_profile_status=MeasurementStatus.OK.value,
+        foot_confidence=100.0,
+        foot_status=MeasurementStatus.OK.value,
+        cd_status=MeasurementStatus.OK.value,
+        cd_confidence=100.0,
+        thk_status=MeasurementStatus.OK.value,
+        thk_confidence=100.0,
+        confidence=100.0,
+        overall_confidence=100.0,
+        status=MeasurementStatus.OK.value,
+        top_profile_points=top_profile,
+        left_boundary_points=left_boundary,
+        right_boundary_points=right_boundary,
+        baseline_line=(float(left[0]), baseline_y, float(right[0]), baseline_y),
+        cd_line=(float(left[0]), baseline_y, float(right[0]), baseline_y),
+        thk_line=(center_x, float(top[1]), center_x, float(bottom[1])),
+    )
+
+
 def make_manual_measurement(points: Sequence[Point], settings: MeasurementSettings) -> MeasurementResult:
     measurement_type = settings.measurement_type
     required = required_manual_points(measurement_type)
@@ -157,7 +271,7 @@ def make_manual_measurement(points: Sequence[Point], settings: MeasurementSettin
         result.vertical_thk = _distance_result(ordered[0], ordered[1], "vertical", settings.distance_method)
     elif measurement_type == "distance_both":
         result.horizontal_cd = _distance_result(ordered[0], ordered[1], "horizontal", settings.distance_method)
-        result.vertical_thk = _distance_result(ordered[0], ordered[1], "vertical", settings.distance_method)
+        result.vertical_thk = _distance_result(ordered[2], ordered[3], "vertical", settings.distance_method)
     elif measurement_type == "taper_single":
         side = settings.taper_side if settings.taper_side in {"left", "right"} else "left"
         taper = _taper_result(ordered[0], ordered[1], side)
@@ -178,40 +292,13 @@ def make_manual_measurement(points: Sequence[Point], settings: MeasurementSettin
         if len(angles) == 2:
             result.taper_angle_diff = float(abs(angles[0] - angles[1]))
     elif measurement_type == "hole_cd":
-        p1, p2 = ordered[0], ordered[1]
-        horizontal = abs(float(p2[0]) - float(p1[0]))
-        vertical = abs(float(p2[1]) - float(p1[1]))
-        diameter = float(max(horizontal, vertical))
-        cx = (float(p1[0]) + float(p2[0])) * 0.5
-        cy = (float(p1[1]) + float(p2[1])) * 0.5
-        rx = max(horizontal * 0.5, 1.0)
-        ry = max(vertical * 0.5, 1.0)
-        contour = [
-            (cx + rx * math.cos(theta), cy + ry * math.sin(theta))
-            for theta in np.linspace(0.0, 2.0 * math.pi, 180, endpoint=False)
-        ]
-        area = math.pi * rx * ry
-        perimeter = math.pi * (3 * (rx + ry) - math.sqrt((3 * rx + ry) * (rx + 3 * ry)))
-        result.hole_cd = HoleCDResult(
-            target=getattr(settings, "hole_target", "inner"),
-            horizontal_px=horizontal,
-            vertical_px=vertical,
-            min_feret_px=min(horizontal, vertical),
-            max_feret_px=diameter,
-            equivalent_diameter_px=math.sqrt(4.0 * area / math.pi),
-            area_px=area,
-            perimeter_px=perimeter,
-            coverage=1.0,
-            mean_radius=(rx + ry) * 0.5,
-            radius_std=abs(rx - ry) * 0.5,
-            mean_strength=1.0,
-            smoothness=0.0,
-            continuity=1.0,
-            confidence=100.0,
-            status=MeasurementStatus.OK.value,
-            contour_points=contour,
-            center=(cx, cy),
-        )
+        result.horizontal_cd = _distance_result(ordered[0], ordered[1], "horizontal", settings.distance_method)
+        result.vertical_thk = _distance_result(ordered[2], ordered[3], "vertical", settings.distance_method)
+        result.hole_cd = _manual_hole_result(result.horizontal_cd, result.vertical_thk, settings)
+    elif measurement_type == "crater":
+        result.horizontal_cd = _distance_result(ordered[0], ordered[1], "horizontal", settings.distance_method)
+        result.vertical_thk = _distance_result(ordered[2], ordered[3], "vertical", settings.distance_method)
+        result.crater = _manual_crater_result(result.horizontal_cd, result.vertical_thk, settings)
     else:
         result.status = MeasurementStatus.FAIL.value
         result.overall_confidence = 0.0
