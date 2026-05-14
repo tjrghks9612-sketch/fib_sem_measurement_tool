@@ -90,10 +90,10 @@
 
 ## Hole CD 1.png
 - expected_mode: Hole CD
-- measured_values: hole_h_px=345.3, hole_v_px=324.3, hole_target=inner, hole_coverage=0.975
-- confidence: 72.54
-- status: Check
-- warning_message: radius_outliers_interpolated
+- measured_values: hole_h_px=300.6, hole_v_px=322.3, hole_target=inner, hole_coverage=1
+- confidence: 86.4
+- status: OK
+- warning_message: -
 - overlay_path: validation_outputs/overlays/Hole CD 1_overlay.png
 - target_overlay_path: validation_outputs/target_overlays/Hole CD 1_target.png
 - validation: pass
@@ -101,8 +101,8 @@
 
 ## Hole CD 2.png
 - expected_mode: Hole CD
-- measured_values: hole_h_px=351.2, hole_v_px=393.2, hole_target=inner, hole_coverage=1
-- confidence: 80.53
+- measured_values: hole_h_px=343.2, hole_v_px=336.7, hole_target=inner, hole_coverage=1
+- confidence: 85.77
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Hole CD 2_overlay.png
@@ -112,8 +112,8 @@
 
 ## Crater 1.png
 - expected_mode: Crater
-- measured_values: crater_cd_px=664, crater_thk_px=154.9, crater_left_taper_deg=40.35, crater_right_taper_deg=40.44
-- confidence: 84.02
+- measured_values: crater_cd_px=664, crater_thk_px=154.9, crater_left_taper_deg=40.57, crater_right_taper_deg=40.67
+- confidence: 83.83
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 1_overlay.png
@@ -123,8 +123,8 @@
 
 ## Crater 2.png
 - expected_mode: Crater
-- measured_values: crater_cd_px=844, crater_thk_px=152.8, crater_left_taper_deg=31.08, crater_right_taper_deg=31.24
-- confidence: 91.04
+- measured_values: crater_cd_px=844, crater_thk_px=152.8, crater_left_taper_deg=31.51, crater_right_taper_deg=31.85
+- confidence: 92.28
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 2_overlay.png

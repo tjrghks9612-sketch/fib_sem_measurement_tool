@@ -53,6 +53,7 @@ def option_visibility_for_measurement_type(measurement_type: str, boundary_angle
         "boundary_angle_filter": is_distance,
         "max_boundary_angle": is_distance and boundary_angle_filter_enabled,
         "taper_height": is_taper,
+        "crater_taper_height": is_crater,
         "selected_edges": is_distance or is_taper or is_hole or is_crater,
         "fit_line": is_taper or is_crater,
         "ROI": is_distance or is_taper or is_hole or is_crater,
@@ -90,6 +91,7 @@ class OptionPanel(ctk.CTkFrame):
         self.delta_var = tk.StringVar(value="55")
         self.max_boundary_angle_var = tk.StringVar(value="18°")
         self.taper_height_var = tk.StringVar(value="30%")
+        self.crater_taper_height_var = tk.StringVar(value="15%")
         self.normalize_signal_var = tk.BooleanVar(value=False)
         self.denoise_signal_var = tk.BooleanVar(value=False)
         self.boundary_angle_filter_var = tk.BooleanVar(value=False)
@@ -158,6 +160,7 @@ class OptionPanel(ctk.CTkFrame):
         self.edge_scan_mode_menu = None
         self.max_boundary_angle_slider = None
         self.taper_height_slider = None
+        self.crater_taper_height_slider = None
         self.detect_scale_bar_button = None
         self.apply_calibration_button = None
         visibility = option_visibility_for_measurement_type(
@@ -224,6 +227,13 @@ class OptionPanel(ctk.CTkFrame):
             self.taper_height_slider = ctk.CTkSlider(row, from_=0, to=100, command=self._taper_height_changed)
             self.taper_height_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
             ctk.CTkLabel(row, textvariable=self.taper_height_var, width=46, anchor="e", text_color="#dbe7f2").grid(
+                row=0, column=2, sticky="e"
+            )
+        if visibility["crater_taper_height"]:
+            row = self._row("crater_taper_height")
+            self.crater_taper_height_slider = ctk.CTkSlider(row, from_=0, to=100, command=self._crater_taper_height_changed)
+            self.crater_taper_height_slider.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+            ctk.CTkLabel(row, textvariable=self.crater_taper_height_var, width=46, anchor="e", text_color="#dbe7f2").grid(
                 row=0, column=2, sticky="e"
             )
 
@@ -345,6 +355,12 @@ class OptionPanel(ctk.CTkFrame):
         if not self._loading:
             self._schedule_slider_changed()
 
+    def _crater_taper_height_changed(self, raw_value: float) -> None:
+        value = int(round(float(raw_value)))
+        self.crater_taper_height_var.set(f"{value}%")
+        if not self._loading:
+            self._schedule_slider_changed()
+
     def _max_boundary_angle_changed(self, raw_value: float) -> None:
         value = int(round(float(raw_value)))
         self.max_boundary_angle_var.set(f"{value}°")
@@ -389,6 +405,10 @@ class OptionPanel(ctk.CTkFrame):
             settings.max_cd_thk_boundary_angle_deg,
         )
         settings.base_height_pct = self._float(self.taper_height_var.get().replace("%", ""), settings.base_height_pct)
+        settings.crater_taper_height_percent = self._float(
+            self.crater_taper_height_var.get().replace("%", ""),
+            getattr(settings, "crater_taper_height_percent", 15.0),
+        )
         settings.calibration.unit = self.unit_var.get()
         settings.show_raw_candidates = False
         settings.show_selected_edges = bool(self.show_selected_var.get())
@@ -432,6 +452,10 @@ class OptionPanel(ctk.CTkFrame):
         self.taper_height_var.set(f"{taper_height}%")
         if self.taper_height_slider is not None:
             self.taper_height_slider.set(taper_height)
+        crater_taper_height = max(0, min(100, int(round(float(getattr(settings, "crater_taper_height_percent", 15.0))))))
+        self.crater_taper_height_var.set(f"{crater_taper_height}%")
+        if self.crater_taper_height_slider is not None:
+            self.crater_taper_height_slider.set(crater_taper_height)
         self.show_selected_var.set(bool(settings.show_selected_edges))
         self.show_fit_var.set(bool(settings.show_fit_line))
         self.show_roi_var.set(bool(settings.show_roi))
@@ -476,11 +500,11 @@ class OptionPanel(ctk.CTkFrame):
         unit = settings.calibration.unit
         scale = settings.calibration.px_to_real
         if result.horizontal_cd and result.horizontal_cd.selected_px is not None:
-            return f"CD {result.horizontal_cd.selected_px * scale:.4g} {unit}"
+            return f"CD {result.horizontal_cd.selected_px * scale:.2f} {unit}"
         if result.vertical_thk and result.vertical_thk.selected_px is not None:
-            return f"THK {result.vertical_thk.selected_px * scale:.4g} {unit}"
+            return f"THK {result.vertical_thk.selected_px * scale:.2f} {unit}"
         if result.hole_cd and result.hole_cd.horizontal_px is not None:
-            return f"Hole CD {result.hole_cd.horizontal_px * scale:.4g} x {result.hole_cd.vertical_px * scale:.4g} {unit}"
+            return f"Hole CD {result.hole_cd.horizontal_px * scale:.2f} x {result.hole_cd.vertical_px * scale:.2f} {unit}"
         if result.crater and result.crater.cd_px is not None:
             thk = result.crater.thk_px * scale if result.crater.thk_px is not None else 0.0
             left = result.crater.left_taper_angle_horizontal
@@ -488,7 +512,7 @@ class OptionPanel(ctk.CTkFrame):
             taper = ""
             if left is not None and right is not None:
                 taper = f" / L {left:.1f} deg R {right:.1f} deg"
-            return f"Crater CD {result.crater.cd_px * scale:.4g} {unit} / THK {thk:.4g} {unit}{taper}"
+            return f"Crater CD {result.crater.cd_px * scale:.2f} {unit} / THK {thk:.2f} {unit}{taper}"
         if result.avg_taper_angle is not None:
             return f"{t(self.language, 'average_taper')} {result.avg_taper_angle:.2f} deg"
         if result.left_taper and result.left_taper.angle_horizontal is not None:

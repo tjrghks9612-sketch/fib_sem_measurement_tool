@@ -38,6 +38,7 @@ class HoleBoundaryTrack:
     max_gap: int = 0
     score: float = 0.0
     warnings: list[str] = field(default_factory=list)
+    source: str = "gradient"
 
 
 ANGLE_SAMPLES = 360
@@ -51,17 +52,51 @@ def _refine_center(gray: np.ndarray, roi: Sequence[int]) -> tuple[float, float]:
     crop = gray[y1 : y2 + 1, x1 : x2 + 1]
     if crop.size == 0:
         return cx, cy
-    threshold = float(np.percentile(crop, 20.0))
-    mask = crop <= threshold
-    if int(mask.sum()) < max(20, int(crop.size * 0.015)):
+    processed = preprocess_target_roi(crop)
+    local_cx = cx - x1
+    local_cy = cy - y1
+    max_shift = min(x2 - x1 + 1, y2 - y1 + 1) * 0.22
+    min_area = max(24, int(crop.size * 0.002))
+    max_area = int(crop.size * 0.32)
+    best: tuple[float, float, float] | None = None
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    for percentile in (6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0):
+        threshold = float(np.percentile(processed, percentile))
+        mask = (processed <= threshold).astype(np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
+        component_count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+        for label in range(1, component_count):
+            area = int(stats[label, cv2.CC_STAT_AREA])
+            if area < min_area or area > max_area:
+                continue
+            left = int(stats[label, cv2.CC_STAT_LEFT])
+            top = int(stats[label, cv2.CC_STAT_TOP])
+            width = int(stats[label, cv2.CC_STAT_WIDTH])
+            height = int(stats[label, cv2.CC_STAT_HEIGHT])
+            if left <= 1 or top <= 1 or left + width >= crop.shape[1] - 1 or top + height >= crop.shape[0] - 1:
+                continue
+            comp_cx, comp_cy = (float(centroids[label][0]), float(centroids[label][1]))
+            shift = math.hypot(comp_cx - local_cx, comp_cy - local_cy)
+            if shift > max_shift:
+                continue
+            area_fraction = area / float(crop.size)
+            compactness = area / max(float(width * height), 1.0)
+            # Prefer the central dark basin over outer annular shadows. Small percentile masks
+            # anchor the true opening center even when the inside is gray or mottled.
+            score = (
+                70.0
+                - shift / max(max_shift, 1.0) * 34.0
+                + min(area_fraction / 0.08, 1.0) * 18.0
+                + min(compactness / 0.55, 1.0) * 8.0
+                - abs(area_fraction - 0.075) * 26.0
+            )
+            if best is None or score > best[0]:
+                best = (score, x1 + comp_cx, y1 + comp_cy)
+    if best is None:
         return cx, cy
-    ys, xs = np.nonzero(mask)
-    refined_x = x1 + float(np.mean(xs))
-    refined_y = y1 + float(np.mean(ys))
-    max_shift = min(x2 - x1 + 1, y2 - y1 + 1) * 0.18
-    if math.hypot(refined_x - cx, refined_y - cy) > max_shift:
-        return cx, cy
-    return refined_x, refined_y
+    return best[1], best[2]
 
 
 def _max_radius_to_roi(cx: float, cy: float, roi: Sequence[int]) -> int:
@@ -166,6 +201,19 @@ def _interp_circular(values: np.ndarray) -> np.ndarray:
     return np.interp(np.arange(n), xp_ext, fp_ext)
 
 
+def _median_smooth_circular(values: np.ndarray, window: int = 9) -> np.ndarray:
+    if values.size == 0 or window <= 1:
+        return values
+    if window % 2 == 0:
+        window += 1
+    radius = window // 2
+    padded = np.concatenate([values[-radius:], values, values[:radius]])
+    out = np.empty_like(values, dtype=np.float64)
+    for idx in range(values.size):
+        out[idx] = float(np.median(padded[idx : idx + window]))
+    return out
+
+
 def _smooth_circular(values: np.ndarray, window: int = 5) -> np.ndarray:
     if window <= 1:
         return values
@@ -206,6 +254,25 @@ def _gaussian_smooth_circular(values: np.ndarray, window: int = 17, sigma: float
     return np.convolve(padded, kernel, mode="valid")
 
 
+def _lowpass_circular(values: np.ndarray, keep_harmonics: int = 10) -> np.ndarray:
+    if values.size == 0:
+        return values
+    spectrum = np.fft.rfft(values.astype(np.float64))
+    if spectrum.size > keep_harmonics + 1:
+        spectrum[keep_harmonics + 1 :] = 0
+    return np.fft.irfft(spectrum, n=values.size).astype(np.float64)
+
+
+def _regularize_radii(values: np.ndarray) -> np.ndarray:
+    filled = _interp_circular(values)
+    medianed = _median_smooth_circular(filled, 9)
+    smoothed = _gaussian_smooth_circular(medianed, 45, 8.0)
+    rounded = _lowpass_circular(smoothed, 10)
+    # Keep a little of the Gaussian-smoothed contour so oval and low-frequency
+    # asymmetry survive, while high-frequency SEM roughness is suppressed.
+    return (rounded * 0.72 + smoothed * 0.28).astype(np.float64)
+
+
 def _score_track(radii: np.ndarray, strengths: np.ndarray, max_radius: int) -> HoleBoundaryTrack:
     valid = np.isfinite(radii)
     coverage = float(valid.mean()) if valid.size else 0.0
@@ -215,10 +282,10 @@ def _score_track(radii: np.ndarray, strengths: np.ndarray, max_radius: int) -> H
     if finite.size == 0:
         return HoleBoundaryTrack(radii, strengths, warnings=["no_valid_hole_boundary"])
     cleaned, outlier_count = _despike_circular(filled, 17, 2.8)
-    smoothed = _gaussian_smooth_circular(cleaned, 25, 4.2)
+    smoothed = _regularize_radii(cleaned)
     deltas = np.abs(np.diff(np.concatenate([smoothed, smoothed[:1]])))
-    mean_radius = float(np.mean(finite))
-    radius_std = float(np.std(finite))
+    mean_radius = float(np.mean(smoothed))
+    radius_std = float(np.std(smoothed))
     mean_strength = float(np.nanmean(strengths)) if np.isfinite(strengths).any() else 0.0
     smoothness = float(np.mean(deltas))
     continuity = max(0.0, 1.0 - float(max_gap) / max(1.0, radii.size * 0.18))
@@ -259,6 +326,88 @@ def _score_track(radii: np.ndarray, strengths: np.ndarray, max_radius: int) -> H
         score=float(score),
         warnings=warnings,
     )
+
+
+def _central_dark_track(gray: np.ndarray, roi: Sequence[int], center: tuple[float, float], max_radius: int) -> HoleBoundaryTrack | None:
+    x1, y1, x2, y2 = [int(v) for v in roi]
+    crop = gray[y1 : y2 + 1, x1 : x2 + 1]
+    if crop.size == 0:
+        return None
+    processed = preprocess_target_roi(crop)
+    local_cx = center[0] - x1
+    local_cy = center[1] - y1
+    min_area = max(24, int(crop.size * 0.002))
+    max_area = int(crop.size * 0.26)
+    max_shift = min(crop.shape[:2]) * 0.18
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    best: tuple[float, np.ndarray] | None = None
+    thresholds = [float(np.percentile(processed, p)) for p in (6.0, 8.0, 10.0, 12.0, 16.0, 20.0)]
+    otsu, _mask = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    thresholds.append(float(min(otsu, np.percentile(processed, 24.0))))
+    for threshold in thresholds:
+        mask = (processed <= threshold).astype(np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_close)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
+        component_count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+        for label in range(1, component_count):
+            area = int(stats[label, cv2.CC_STAT_AREA])
+            if area < min_area or area > max_area:
+                continue
+            left = int(stats[label, cv2.CC_STAT_LEFT])
+            top = int(stats[label, cv2.CC_STAT_TOP])
+            width = int(stats[label, cv2.CC_STAT_WIDTH])
+            height = int(stats[label, cv2.CC_STAT_HEIGHT])
+            if left <= 1 or top <= 1 or left + width >= crop.shape[1] - 1 or top + height >= crop.shape[0] - 1:
+                continue
+            comp_cx, comp_cy = float(centroids[label][0]), float(centroids[label][1])
+            shift = math.hypot(comp_cx - local_cx, comp_cy - local_cy)
+            if shift > max_shift:
+                continue
+            component = (labels == label).astype(np.uint8)
+            full_mask = np.zeros_like(gray, dtype=np.uint8)
+            full_mask[y1 : y2 + 1, x1 : x2 + 1] = component * 255
+            polar_mask = _polar_image(full_mask, center, max_radius, ANGLE_SAMPLES) > 127
+            track_radii = np.full(ANGLE_SAMPLES, np.nan, dtype=np.float64)
+            for theta_index, row in enumerate(polar_mask):
+                indices = np.flatnonzero(row)
+                if indices.size:
+                    track_radii[theta_index] = float(indices[-1])
+            coverage = float(np.isfinite(track_radii).mean())
+            if coverage < 0.72:
+                continue
+            rough = _interp_circular(track_radii)
+            mean_radius = float(np.mean(rough))
+            if mean_radius < max_radius * 0.10 or mean_radius > max_radius * 0.62:
+                continue
+            radius_cv = float(np.std(rough) / max(mean_radius, 1.0))
+            score = (
+                coverage * 55.0
+                - shift / max(max_shift, 1.0) * 18.0
+                + min(area / float(crop.size) / 0.08, 1.0) * 8.0
+                - min(radius_cv / 0.28, 1.0) * 18.0
+                - mean_radius / max(max_radius, 1.0) * 28.0
+                - max(0.0, mean_radius / max(max_radius, 1.0) - 0.42) * 28.0
+            )
+            if best is None or score > best[0]:
+                best = (score, track_radii)
+    if best is None:
+        return None
+    strengths = np.full(ANGLE_SAMPLES, np.nan, dtype=np.float64)
+    track = _score_track(best[1], strengths, max_radius)
+    track.source = "central_dark_component"
+    track.score = max(track.score, float(best[0]))
+    return track
+
+
+def _dedupe_tracks(tracks: list[HoleBoundaryTrack], max_radius: int) -> list[HoleBoundaryTrack]:
+    ordered = sorted(tracks, key=lambda item: item.score, reverse=True)
+    kept: list[HoleBoundaryTrack] = []
+    for track in ordered:
+        if any(abs(track.mean_radius - other.mean_radius) < max(5.0, max_radius * 0.035) for other in kept):
+            continue
+        kept.append(track)
+    return sorted(kept, key=lambda item: item.mean_radius)
 
 
 def _build_tracks(candidates_by_angle: list[list[HoleEdgeCandidate]], max_radius: int) -> list[HoleBoundaryTrack]:
@@ -422,15 +571,27 @@ def measure_hole_cd(gray: np.ndarray, roi: Sequence[int], settings: MeasurementS
     polar = _polar_image(work_gray, center, max_radius, ANGLE_SAMPLES)
     candidates = _extract_candidates(polar, settings)
     tracks = _build_tracks(candidates, max_radius)
+    dark_track = _central_dark_track(work_gray, roi, center, max_radius)
+    if dark_track is not None:
+        # Use the central dark basin as an anchor/fallback, not as a raw edge
+        # replacement. It prevents inner stains from winning and keeps the
+        # selected gradient boundary tied to the visible opening.
+        tracks.append(dark_track)
+    tracks = _dedupe_tracks(tracks, max_radius)
+    min_inner_radius = max_radius * 0.12
+    if dark_track is not None and dark_track.mean_radius > 0:
+        min_inner_radius = max(min_inner_radius, dark_track.mean_radius * 0.90)
     valid_tracks = [
         track
         for track in tracks
         if track.coverage >= 0.45
-        and track.mean_radius >= max_radius * 0.12
+        and track.mean_radius >= (min_inner_radius if target != "outer" else max_radius * 0.12)
         and track.mean_radius <= max_radius * 0.88
         and track.max_gap <= ANGLE_SAMPLES * 0.20
         and track.score >= 38.0
     ]
+    if not valid_tracks and target != "outer" and dark_track is not None and dark_track.coverage >= 0.70:
+        valid_tracks = [dark_track]
     if not valid_tracks:
         hole = HoleCDResult(target=target, status=MeasurementStatus.FAIL.value, warning_message="no_valid_hole_boundary")
         return MeasurementResult(measurement_type="hole_cd", hole_cd=hole, overall_confidence=0.0, status=MeasurementStatus.FAIL.value)

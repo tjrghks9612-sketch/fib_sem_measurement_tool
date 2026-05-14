@@ -20,6 +20,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
 
     def test_minimum_grayscale_delta_default_is_55(self) -> None:
         self.assertEqual(MeasurementSettings().minimum_grayscale_delta, 55.0)
+        self.assertEqual(MeasurementSettings().crater_taper_height_percent, 15.0)
 
     def test_distance_modes_only_show_distance_options(self) -> None:
         for measurement_type in ("distance_horizontal", "distance_vertical", "distance_both"):
@@ -31,6 +32,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
             self.assertTrue(visibility["calibration"])
             self.assertFalse(visibility["taper_side"])
             self.assertFalse(visibility["taper_height"])
+            self.assertFalse(visibility["crater_taper_height"])
             self.assertFalse(visibility["fit_line"])
 
     def test_taper_modes_only_show_taper_options(self) -> None:
@@ -48,6 +50,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
             self.assertFalse(visibility["denoise_signal"])
             self.assertFalse(visibility["boundary_angle_filter"])
             self.assertFalse(visibility["calibration"])
+            self.assertFalse(visibility["crater_taper_height"])
 
     def test_max_boundary_angle_only_shows_when_angle_filter_is_on(self) -> None:
         hidden = option_visibility_for_measurement_type("distance_horizontal", boundary_angle_filter_enabled=False)
@@ -67,6 +70,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
         self.assertFalse(visibility["representative_value"])
         self.assertFalse(visibility["edge_scan_start"])
         self.assertFalse(visibility["taper_height"])
+        self.assertFalse(visibility["crater_taper_height"])
 
     def test_crater_only_shows_crater_relevant_options(self) -> None:
         visibility = option_visibility_for_measurement_type("crater")
@@ -74,6 +78,7 @@ class UiMeasurementOptionsTest(unittest.TestCase):
         self.assertTrue(visibility["minimum_delta"])
         self.assertTrue(visibility["calibration"])
         self.assertTrue(visibility["fit_line"])
+        self.assertTrue(visibility["crater_taper_height"])
         self.assertFalse(visibility["hole_target"])
         self.assertFalse(visibility["representative_value"])
         self.assertFalse(visibility["edge_scan_start"])

@@ -38,7 +38,6 @@ SHADOW: Color = (8, 10, 14)
 def _ui_font(size: int):
     candidates = [
         "C:/Windows/Fonts/malgun.ttf",
-        "C:/Windows/Fonts/malgunbd.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "arial.ttf",
@@ -74,6 +73,33 @@ def _draw_text(image: np.ndarray, text: str, origin: Tuple[int, int], color: Col
     image[y:y2, x:x2] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
 
 
+def _draw_text_centered(image: np.ndarray, text: str, box: Tuple[int, int, int, int], color: Color, font_size: int = 16) -> None:
+    font = _ui_font(font_size)
+    left, top, right, bottom = [int(v) for v in box]
+    left = max(0, min(left, image.shape[1] - 1))
+    top = max(0, min(top, image.shape[0] - 1))
+    right = max(left + 1, min(right, image.shape[1]))
+    bottom = max(top + 1, min(bottom, image.shape[0]))
+    if right <= left or bottom <= top:
+        return
+    patch = image[top:bottom, left:right]
+    if patch.size == 0:
+        return
+    pil = Image.fromarray(cv2.cvtColor(patch, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil)
+    rgb = (int(color[2]), int(color[1]), int(color[0]))
+    lines = text.splitlines() or [text]
+    line_sizes = [_measure_text(line, font) for line in lines]
+    line_gap = max(3, font_size // 5)
+    total_h = sum(size[1] for size in line_sizes) + line_gap * (len(lines) - 1)
+    y = max(0, int(round((patch.shape[0] - total_h) * 0.5)))
+    for line, (tw, th) in zip(lines, line_sizes):
+        x = max(0, int(round((patch.shape[1] - tw) * 0.5)))
+        draw.text((x, y), line, fill=rgb, font=font)
+        y += th + line_gap
+    image[top:bottom, left:right] = cv2.cvtColor(np.asarray(pil), cv2.COLOR_RGB2BGR)
+
+
 def _panel(image: np.ndarray, left: int, top: int, right: int, bottom: int, alpha: float = 0.72) -> None:
     left = max(0, min(int(left), image.shape[1] - 1))
     top = max(0, min(int(top), image.shape[0] - 1))
@@ -94,6 +120,19 @@ def _stroke_line(
 ) -> None:
     cv2.line(image, p1, p2, SHADOW, shadow, cv2.LINE_AA)
     cv2.line(image, p1, p2, color, thickness, cv2.LINE_AA)
+
+
+def _stroke_line_alpha(
+    image: np.ndarray,
+    p1: Tuple[int, int],
+    p2: Tuple[int, int],
+    color: Color,
+    thickness: int = 1,
+    alpha: float = 0.45,
+) -> None:
+    overlay = image.copy()
+    cv2.line(overlay, p1, p2, color, thickness, cv2.LINE_AA)
+    cv2.addWeighted(overlay, alpha, image, 1.0 - alpha, 0, image)
 
 
 def _stroke_polyline(image: np.ndarray, points: np.ndarray, closed: bool, color: Color, thickness: int = 2) -> None:
@@ -133,18 +172,60 @@ def _stroke_trace_segments(
         _stroke_polyline(image, np.asarray(segment, dtype=np.int32).reshape(-1, 1, 2), False, color, thickness)
 
 
-def _label(image: np.ndarray, text: str, origin: Tuple[int, int], color: Color, scale: float = 0.55) -> None:
+def _boxes_overlap(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def _bbox_for_points(points: Sequence[Tuple[int, int]], pad: int = 8) -> Tuple[int, int, int, int]:
+    xs = [point[0] for point in points]
+    ys = [point[1] for point in points]
+    return min(xs) - pad, min(ys) - pad, max(xs) + pad, max(ys) + pad
+
+
+def _label(
+    image: np.ndarray,
+    text: str,
+    origin: Tuple[int, int],
+    color: Color,
+    scale: float = 0.55,
+    avoid: Sequence[Tuple[int, int, int, int]] = (),
+) -> Tuple[int, int, int, int]:
     font_size = max(11, int(round(scale * 28)))
     font = _ui_font(font_size)
-    x, y = origin
-    tw, th = _measure_text(text, font)
-    x = max(4, min(int(x), image.shape[1] - tw - 10))
-    y = max(th + 10, min(int(y), image.shape[0] - 8))
-    text_top = y - th
+    lines = text.splitlines() or [text]
+    sizes = [_measure_text(line, font) for line in lines]
+    tw = max(width for width, _height in sizes)
+    th = sum(height for _width, height in sizes) + max(3, font_size // 5) * (len(lines) - 1)
     pad_x = 8
     pad_y = 5
-    _panel(image, x - pad_x, text_top - pad_y, x + tw + pad_x, text_top + th + pad_y, alpha=0.76)
-    _draw_text(image, text, (x, text_top), color, font_size)
+    x0, y0 = int(origin[0]), int(origin[1])
+    candidates = [
+        (x0, y0 - th),
+        (x0 + 16, y0 + 16),
+        (x0 - tw - 20, y0 - th),
+        (x0 - tw - 20, y0 + 16),
+        (x0 + 16, y0 - th - 24),
+        (x0 - tw - 20, y0 - th - 24),
+    ]
+    selected = candidates[0]
+    best_penalty = float("inf")
+    for candidate_x, candidate_y in candidates:
+        left = max(4, min(int(candidate_x - pad_x), image.shape[1] - tw - pad_x * 2 - 4))
+        top = max(4, min(int(candidate_y - pad_y), image.shape[0] - th - pad_y * 2 - 4))
+        box = (left, top, left + tw + pad_x * 2, top + th + pad_y * 2)
+        overlap_penalty = sum(1 for avoid_box in avoid if _boxes_overlap(box, avoid_box))
+        distance_penalty = abs(left - (x0 - pad_x)) * 0.001 + abs(top - (y0 - th - pad_y)) * 0.001
+        penalty = overlap_penalty * 1000.0 + distance_penalty
+        if penalty < best_penalty:
+            best_penalty = penalty
+            selected = (left + pad_x, top + pad_y)
+            if overlap_penalty == 0:
+                break
+    text_left, text_top = selected
+    box = (text_left - pad_x, text_top - pad_y, text_left + tw + pad_x, text_top + th + pad_y)
+    _panel(image, *box, alpha=0.76)
+    _draw_text_centered(image, text, box, color, font_size)
+    return box
 
 
 def _label_next_to_target(
@@ -202,7 +283,7 @@ def _format_value(px_value: Optional[float], settings: MeasurementSettings) -> s
     if px_value is None:
         return "-"
     value = px_value * settings.calibration.px_to_real
-    return f"{value:.3g} {settings.calibration.unit}"
+    return f"{value:.2f} {settings.calibration.unit}"
 
 
 def _clamp_pct(value: float) -> float:
@@ -299,7 +380,13 @@ def _draw_distance(image: np.ndarray, result: DistanceResult, settings: Measurem
     cv2.circle(image, p2, 4, color, -1, cv2.LINE_AA)
     if settings.show_labels:
         mid = (int(round((p1[0] + p2[0]) / 2)), int(round((p1[1] + p2[1]) / 2)))
-        _label(image, f"{label_prefix} {_format_value(result.selected_px, settings)}", (mid[0] + 8, mid[1] - 8), color)
+        _label(
+            image,
+            f"{label_prefix} {_format_value(result.selected_px, settings)}",
+            (mid[0] + 8, mid[1] - 8),
+            color,
+            avoid=(_bbox_for_points([p1, p2], 14),),
+        )
 
 
 def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, settings: MeasurementSettings, language: str) -> None:
@@ -309,7 +396,7 @@ def _draw_taper(image: np.ndarray, taper: TaperSideResult, color: Color, setting
         x1, y1, x2, y2 = taper.fit_line
         p1 = (int(round(x1)), int(round(y1)))
         p2 = (int(round(x2)), int(round(y2)))
-        _stroke_line(image, p1, p2, color, 2, 5)
+        _stroke_line_alpha(image, p1, p2, color, 1, 0.45)
         if settings.show_labels:
             angle = taper.angle_horizontal if taper.angle_horizontal is not None else 0.0
             side = taper_side_label(language, taper.side)
@@ -363,16 +450,24 @@ def _draw_hole_cd(image: np.ndarray, result, settings: MeasurementSettings) -> N
     _stroke_line(image, (cx, int(round(y_min))), (cx, int(round(y_max))), THK_COLOR, 2, 5)
     if settings.show_labels:
         label = f"Hole {_format_value(result.horizontal_px, settings)} x {_format_value(result.vertical_px, settings)}"
-        _label(image, label, (int(round(x_max)) + 8, cy - 8), ELLIPSE_COLOR, scale=0.46)
+        avoid = (
+            _bbox_for_points([(int(round(x_min)), cy), (int(round(x_max)), cy)], 14),
+            _bbox_for_points([(cx, int(round(y_min))), (cx, int(round(y_max)))], 14),
+            _bbox_for_points([(int(round(x_min)), int(round(y_min))), (int(round(x_max)), int(round(y_max)))], 6),
+        )
+        _label(image, label, (int(round(x_max)) + 8, cy - 8), ELLIPSE_COLOR, scale=0.46, avoid=avoid)
 
 
-def _draw_line_tuple(image: np.ndarray, line, color: Color, thickness: int = 2) -> None:
+def _draw_line_tuple(image: np.ndarray, line, color: Color, thickness: int = 2, alpha: Optional[float] = None) -> None:
     if not line:
         return
     x1, y1, x2, y2 = line
     p1 = (int(round(x1)), int(round(y1)))
     p2 = (int(round(x2)), int(round(y2)))
-    _stroke_line(image, p1, p2, color, thickness, thickness + 3)
+    if alpha is None:
+        _stroke_line(image, p1, p2, color, thickness, thickness + 3)
+    else:
+        _stroke_line_alpha(image, p1, p2, color, thickness, alpha)
 
 
 def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> None:
@@ -398,28 +493,40 @@ def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> No
     if result.top_profile_points:
         points = np.asarray(result.top_profile_points, dtype=np.int32).reshape(-1, 1, 2)
         _stroke_polyline(image, points, False, ELLIPSE_COLOR, 2)
-    if result.left_boundary_points:
-        points = np.asarray(result.left_boundary_points, dtype=np.int32).reshape(-1, 1, 2)
-        _stroke_polyline(image, points, False, TAPER_LEFT_COLOR, 1)
-    if result.right_boundary_points:
-        points = np.asarray(result.right_boundary_points, dtype=np.int32).reshape(-1, 1, 2)
-        _stroke_polyline(image, points, False, TAPER_RIGHT_COLOR, 1)
     _draw_line_tuple(image, result.baseline_line, THK_COLOR, 2)
     _draw_line_tuple(image, result.cd_line, CD_COLOR, 2)
     _draw_line_tuple(image, result.thk_line, THK_COLOR, 2)
     if settings.show_fit_line:
-        _draw_line_tuple(image, result.left_taper_line, TAPER_LEFT_COLOR, 2)
-        _draw_line_tuple(image, result.right_taper_line, TAPER_RIGHT_COLOR, 2)
+        _draw_line_tuple(image, result.left_taper_line, TAPER_LEFT_COLOR, 1, 0.45)
+        _draw_line_tuple(image, result.right_taper_line, TAPER_RIGHT_COLOR, 1, 0.45)
     for point in ((result.left_foot_x, result.left_foot_y), (result.right_foot_x, result.right_foot_y)):
         if point[0] is not None and point[1] is not None:
             cv2.circle(image, (int(round(point[0])), int(round(point[1]))), 4, CD_COLOR, -1, cv2.LINE_AA)
     if settings.show_labels:
         if result.cd_line and result.cd_px is not None:
             x1, y1, x2, y2 = result.cd_line
-            _label(image, f"Crater CD {_format_value(result.cd_px, settings)}", (int((x1 + x2) * 0.5), int((y1 + y2) * 0.5) - 10), CD_COLOR, scale=0.46)
+            p1 = (int(round(x1)), int(round(y1)))
+            p2 = (int(round(x2)), int(round(y2)))
+            _label(
+                image,
+                f"Crater CD {_format_value(result.cd_px, settings)}",
+                (int(max(x1, x2)) + 10, int((y1 + y2) * 0.5) - 10),
+                CD_COLOR,
+                scale=0.46,
+                avoid=(_bbox_for_points([p1, p2], 14),),
+            )
         if result.thk_line and result.thk_px is not None:
             x1, y1, x2, y2 = result.thk_line
-            _label(image, f"THK {_format_value(result.thk_px, settings)}", (int(max(x1, x2)) + 8, int((y1 + y2) * 0.5)), THK_COLOR, scale=0.46)
+            p1 = (int(round(x1)), int(round(y1)))
+            p2 = (int(round(x2)), int(round(y2)))
+            _label(
+                image,
+                f"THK {_format_value(result.thk_px, settings)}",
+                (int(max(x1, x2)) + 8, int((y1 + y2) * 0.5)),
+                THK_COLOR,
+                scale=0.46,
+                avoid=(_bbox_for_points([p1, p2], 14),),
+            )
         if result.left_taper_line and result.left_taper_angle_horizontal is not None:
             x1, y1, x2, y2 = result.left_taper_line
             _label(image, f"L {result.left_taper_angle_horizontal:.1f} deg", (int(min(x1, x2)) - 10, int(min(y1, y2)) - 8), TAPER_LEFT_COLOR, scale=0.42)
@@ -466,7 +573,14 @@ def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: Measur
     height = 16 + len(lines) * 20
     _panel(image, x, y, x + width, y + height, alpha=0.72)
     for idx, line in enumerate(lines):
-        _draw_text(image, line, (x + 12, y + 9 + idx * 20), status_color if idx == 0 else TEXT, font_size)
+        line_top = y + 6 + idx * 20
+        _draw_text_centered(
+            image,
+            line,
+            (x + 8, line_top, x + width - 8, line_top + 20),
+            status_color if idx == 0 else TEXT,
+            font_size,
+        )
 
 
 def draw_overlay(
@@ -488,7 +602,10 @@ def draw_overlay(
         _draw_taper_height_guides(canvas, roi, settings, result)
     if scale_bar_bbox:
         x1, y1, x2, y2 = [int(v) for v in scale_bar_bbox]
-        cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
+        if abs(y2 - y1) <= 2:
+            _stroke_line(canvas, (x1, y1), (max(x1, x2 - 1), y1), (255, 255, 90), 2, 4)
+        else:
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), (255, 255, 90), 2, cv2.LINE_AA)
         if settings.show_labels:
             _label(canvas, t(language, "scale_bar"), (x1, y1 - 8), (255, 255, 90), scale=0.48)
     if result is not None:
