@@ -65,6 +65,19 @@ class CraterMeasurementTest(unittest.TestCase):
         self.assertGreater(row["crater_thk_px"], 0)
         self.assertEqual(row["crater_taper_height_percent"], 15.0)
 
+    def test_crater_taper_height_percent_moves_measure_marker(self) -> None:
+        image = synthetic_crater()
+        roi = (12, 35, 407, 225)
+        low = run_measurement(image, MeasurementSettings(roi=roi, measurement_type="crater", minimum_grayscale_delta=35, crater_taper_height_percent=15))
+        high = run_measurement(image, MeasurementSettings(roi=roi, measurement_type="crater", minimum_grayscale_delta=35, crater_taper_height_percent=55))
+
+        self.assertIsNotNone(low.crater)
+        self.assertIsNotNone(high.crater)
+        self.assertEqual(low.crater.taper_height_percent, 15.0)
+        self.assertEqual(high.crater.taper_height_percent, 55.0)
+        self.assertNotEqual(low.crater.left_taper_measure_y, high.crater.left_taper_measure_y)
+        self.assertLess(high.crater.left_taper_measure_y, low.crater.left_taper_measure_y)
+
     def test_non_crater_rows_leave_crater_columns_blank(self) -> None:
         item = ImageItem(image_path="unmeasured.png", file_name="unmeasured.png", image_size=(1, 1), result=None)
         row = make_result_row(item, MeasurementSettings(measurement_type="distance_both"))

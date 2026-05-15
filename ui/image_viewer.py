@@ -261,8 +261,12 @@ class ImageViewer(ctk.CTkFrame):
                 segments.append(horizontal(canvas_points[0], canvas_points[1]))
             else:
                 segments.append((canvas_points[0], canvas_points[1]))
+        if mode == "crater" and len(canvas_points) >= 3:
+            baseline_y = int(round((canvas_points[0][1] + canvas_points[1][1]) * 0.5))
+            top = canvas_points[2]
+            segments.append(vertical(top, (top[0], baseline_y)))
         if len(canvas_points) >= 4:
-            if mode in {"distance_both", "hole_cd", "crater"}:
+            if mode in {"distance_both", "hole_cd"}:
                 segments.append(vertical(canvas_points[2], canvas_points[3]))
             elif mode == "taper_double":
                 segments.append((canvas_points[2], canvas_points[3]))

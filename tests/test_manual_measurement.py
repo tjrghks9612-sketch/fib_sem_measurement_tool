@@ -36,9 +36,12 @@ class ManualMeasurementTest(unittest.TestCase):
         self.assertEqual(result.vertical_thk.selected_px, 35)
 
     def test_four_point_modes_require_four_points(self) -> None:
-        for measurement_type in ("distance_both", "hole_cd", "crater", "taper_double"):
+        for measurement_type in ("distance_both", "hole_cd", "taper_double"):
             with self.subTest(measurement_type=measurement_type):
                 self.assertEqual(required_manual_points(measurement_type), 4)
+
+    def test_crater_requires_three_points(self) -> None:
+        self.assertEqual(required_manual_points("crater"), 3)
 
     def test_single_taper_uses_configured_side(self) -> None:
         settings = MeasurementSettings(measurement_type="taper_single", taper_side="right")
@@ -71,16 +74,17 @@ class ManualMeasurementTest(unittest.TestCase):
         self.assertEqual(result.hole_cd.horizontal_px, 60)
         self.assertEqual(result.hole_cd.vertical_px, 60)
 
-    def test_crater_uses_horizontal_and_vertical_manual_axes(self) -> None:
+    def test_crater_uses_horizontal_baseline_and_top_point(self) -> None:
         settings = MeasurementSettings(measurement_type="crater")
 
-        result = make_manual_measurement([(10, 80), (90, 84), (50, 30), (54, 80)], settings)
+        result = make_manual_measurement([(10, 80), (90, 84), (50, 30)], settings)
 
         self.assertIsNotNone(result.horizontal_cd)
         self.assertIsNotNone(result.vertical_thk)
         self.assertIsNotNone(result.crater)
         self.assertEqual(result.crater.cd_px, 80)
-        self.assertEqual(result.crater.thk_px, 50)
+        self.assertEqual(result.crater.thk_px, 52)
+        self.assertEqual(result.crater.thk_line, (50.0, 30.0, 50.0, 82.0))
         self.assertEqual(result.crater.status, "OK")
 
 

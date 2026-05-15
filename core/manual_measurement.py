@@ -21,8 +21,10 @@ Point = Tuple[float, float]
 
 
 def required_manual_points(measurement_type: str) -> int:
-    if measurement_type in {"distance_both", "hole_cd", "crater", "taper_double"}:
+    if measurement_type in {"distance_both", "hole_cd", "taper_double"}:
         return 4
+    if measurement_type == "crater":
+        return 3
     return 2
 
 
@@ -246,6 +248,24 @@ def _manual_crater_result(horizontal_result: DistanceResult, vertical_result: Di
     )
 
 
+def _manual_crater_from_three_points(points: Sequence[Point], settings: MeasurementSettings) -> tuple[DistanceResult, DistanceResult, CraterResult]:
+    left_point, right_point, top_point = _ordered_points(points[:3])
+    horizontal_result = _distance_result(left_point, right_point, "horizontal", settings.distance_method)
+    h1, h2 = _selected_pair_points(horizontal_result)
+    baseline_y = float(h1[1])
+    top_x = float(top_point[0])
+    vertical_result = _distance_result((top_x, float(top_point[1])), (top_x, baseline_y), "vertical", settings.distance_method)
+    crater = _manual_crater_result(horizontal_result, vertical_result, settings)
+    crater.center_x = top_x
+    crater.top_y_at_center = float(top_point[1])
+    crater.baseline_y_at_center = baseline_y
+    crater.thk_line = (top_x, float(top_point[1]), top_x, baseline_y)
+    if crater.top_profile_points:
+        left, right = (h1, h2) if h1[0] <= h2[0] else (h2, h1)
+        crater.top_profile_points = [(float(left[0]), float(top_point[1])), (top_x, float(top_point[1])), (float(right[0]), float(top_point[1]))]
+    return horizontal_result, vertical_result, crater
+
+
 def make_manual_measurement(points: Sequence[Point], settings: MeasurementSettings) -> MeasurementResult:
     measurement_type = settings.measurement_type
     required = required_manual_points(measurement_type)
@@ -296,9 +316,7 @@ def make_manual_measurement(points: Sequence[Point], settings: MeasurementSettin
         result.vertical_thk = _distance_result(ordered[2], ordered[3], "vertical", settings.distance_method)
         result.hole_cd = _manual_hole_result(result.horizontal_cd, result.vertical_thk, settings)
     elif measurement_type == "crater":
-        result.horizontal_cd = _distance_result(ordered[0], ordered[1], "horizontal", settings.distance_method)
-        result.vertical_thk = _distance_result(ordered[2], ordered[3], "vertical", settings.distance_method)
-        result.crater = _manual_crater_result(result.horizontal_cd, result.vertical_thk, settings)
+        result.horizontal_cd, result.vertical_thk, result.crater = _manual_crater_from_three_points(ordered, settings)
     else:
         result.status = MeasurementStatus.FAIL.value
         result.overall_confidence = 0.0
