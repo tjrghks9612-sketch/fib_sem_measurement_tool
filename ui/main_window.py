@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 
 from fib_sem_measurement_tool.core.calibration import apply_calibration, detect_scale_bar
 from fib_sem_measurement_tool.core.image_io import (
+    create_thumbnail,
     filter_image_paths,
     list_image_files,
     load_image_unicode,
@@ -396,6 +397,9 @@ class MainWindow(ctk.CTk):
         if update_option_settings:
             self.option_panel.set_settings(settings)
         self.option_panel.set_candidate_summary(item.result, settings)
+        if self.image_items:
+            self.thumbnail_overlay_cache.pop(self._thumbnail_overlay_cache_key(item, settings), None)
+            self.refresh_thumbnail_panel()
 
     def _render_cache_key(self, item: ImageItem, settings: MeasurementSettings):
         scale_bar_bbox = self.scale_bar_bboxes.get(item.image_path)
@@ -425,6 +429,7 @@ class MainWindow(ctk.CTk):
             round(float(settings.base_height_pct), 4),
             round(float(settings.left_offset_pct), 4),
             round(float(settings.right_offset_pct), 4),
+            round(float(getattr(settings, "crater_taper_height_percent", 15.0)), 4),
             round(float(settings.taper_residual_limit_px), 4),
             settings.taper_left_edge_direction,
             settings.taper_right_edge_direction,
@@ -472,12 +477,16 @@ class MainWindow(ctk.CTk):
             round(float(settings.base_height_pct), 4),
             round(float(settings.left_offset_pct), 4),
             round(float(settings.right_offset_pct), 4),
+            round(float(getattr(settings, "crater_taper_height_percent", 15.0)), 4),
+            round(float(settings.calibration.px_to_real), 8),
+            settings.calibration.unit,
+            settings.calibration.status,
             self.overlay_enabled,
             item.thumbnail.size if item.thumbnail is not None else None,
         )
 
     def get_thumbnail_preview(self, item: ImageItem, settings: MeasurementSettings):
-        if settings.roi is None and item.result is None:
+        if item.image_path != self.current_image_path and settings.roi is None and item.result is None:
             return item.thumbnail
         key = self._thumbnail_overlay_cache_key(item, settings)
         cached = self.thumbnail_overlay_cache.get(key)
@@ -485,12 +494,38 @@ class MainWindow(ctk.CTk):
             self.thumbnail_overlay_cache.move_to_end(key)
             return cached
 
-        pil = self._draw_fast_thumbnail_overlay(item, settings)
+        pil = self._capture_current_render_thumbnail(item)
+        if pil is None:
+            pil = self._render_measured_thumbnail(item, settings)
         self.thumbnail_overlay_cache[key] = pil
         self.thumbnail_overlay_cache.move_to_end(key)
         while len(self.thumbnail_overlay_cache) > self.thumbnail_overlay_cache_limit:
             self.thumbnail_overlay_cache.popitem(last=False)
         return pil
+
+    def _capture_current_render_thumbnail(self, item: ImageItem) -> Optional[Image.Image]:
+        rendered = getattr(self.viewer, "render_bgr", None)
+        if item.image_path == self.current_image_path and rendered is not None:
+            return create_thumbnail(rendered, size=(124, 80))
+        return None
+
+    def _render_measured_thumbnail(self, item: ImageItem, settings: MeasurementSettings) -> Image.Image:
+        if settings.roi is None and item.result is None:
+            return item.thumbnail if item.thumbnail is not None else Image.new("RGB", (124, 80), "#101820")
+        try:
+            image = self.load_image_cached(item.image_path)
+            rendered = draw_overlay(
+                image,
+                settings.roi,
+                item.result,
+                settings,
+                show_overlay=self.overlay_enabled,
+                scale_bar_bbox=self.scale_bar_bboxes.get(item.image_path),
+                language=self.language,
+            )
+            return create_thumbnail(rendered, size=(124, 80))
+        except Exception:
+            return item.thumbnail if item.thumbnail is not None else Image.new("RGB", (124, 80), "#101820")
 
     def _draw_fast_thumbnail_overlay(self, item: ImageItem, settings: MeasurementSettings) -> Image.Image:
         source = item.thumbnail
@@ -669,6 +704,7 @@ class MainWindow(ctk.CTk):
             round(float(settings.base_height_pct), 4),
             round(float(settings.left_offset_pct), 4),
             round(float(settings.right_offset_pct), 4),
+            round(float(getattr(settings, "crater_taper_height_percent", 15.0)), 4),
             round(float(settings.taper_residual_limit_px), 4),
             settings.taper_left_edge_direction,
             settings.taper_right_edge_direction,
@@ -825,7 +861,10 @@ class MainWindow(ctk.CTk):
                     unit=unit,
                 )
             )
+        self.render_cache.clear()
+        self.thumbnail_overlay_cache.clear()
         self.render_current_image()
+        self.refresh_thumbnail_panel()
 
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:

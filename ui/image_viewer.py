@@ -53,6 +53,7 @@ class ImageViewer(ctk.CTkFrame):
         self.manual_point_count = 2
         self.manual_measurement_type = ""
         self.manual_items: list[int] = []
+        self.manual_hint_items: list[int] = []
         self._content_image_id = None
         self._last_render_state = None
         self._last_hover_xy = (None, None)
@@ -113,6 +114,8 @@ class ImageViewer(ctk.CTkFrame):
         self.canvas.configure(cursor="tcross" if clean_mode == "manual" else "crosshair")
         self.roi_button.configure(fg_color="#1f6aa5" if clean_mode == "roi" else "#142234")
         self.manual_button.configure(fg_color="#1f6aa5" if clean_mode == "manual" else "#142234")
+        if clean_mode != "manual":
+            self._clear_manual_hint()
         self._update_manual_status()
 
     def set_manual_point_count(self, count: int, measurement_type: str = "") -> None:
@@ -155,24 +158,40 @@ class ImageViewer(ctk.CTkFrame):
     def zoom_in(self) -> None:
         self.fit_mode = False
         self.zoom = min(8.0, self.zoom * 1.25)
-        self._render()
+        self._render(preserve_offset=False)
 
     def zoom_out(self) -> None:
         self.fit_mode = False
         self.zoom = max(0.05, self.zoom / 1.25)
-        self._render()
+        self._render(preserve_offset=False)
 
     def fit(self) -> None:
         self.fit_mode = True
         self._render()
 
     def _on_mouse_wheel(self, event) -> None:
-        if event.delta > 0:
-            self.zoom_in()
-        else:
-            self.zoom_out()
+        factor = 1.25 if event.delta > 0 else 1 / 1.25
+        self._zoom_at(event.x, event.y, factor)
 
-    def _render(self) -> None:
+    def _zoom_at(self, canvas_x: int, canvas_y: int, factor: float) -> None:
+        if self.render_bgr is None:
+            return
+        if self.draw_w <= 0 or self.draw_h <= 0:
+            self._render()
+        old_scale = max(self.scale, 1e-6)
+        if not self._is_canvas_inside_image(canvas_x, canvas_y):
+            canvas_x = self.canvas.winfo_width() // 2
+            canvas_y = self.canvas.winfo_height() // 2
+        image_x = (canvas_x - self.offset_x) / old_scale
+        image_y = (canvas_y - self.offset_y) / old_scale
+        self.fit_mode = False
+        self.zoom = max(0.05, min(8.0, self.zoom * factor))
+        self.scale = self.zoom
+        self.offset_x = int(round(canvas_x - image_x * self.scale))
+        self.offset_y = int(round(canvas_y - image_y * self.scale))
+        self._render(preserve_offset=True)
+
+    def _render(self, preserve_offset: bool = False) -> None:
         if self.render_bgr is None:
             return
         canvas_w = max(1, self.canvas.winfo_width())
@@ -185,8 +204,11 @@ class ImageViewer(ctk.CTkFrame):
             self.scale = self.zoom
         self.draw_w = max(1, int(w * self.scale))
         self.draw_h = max(1, int(h * self.scale))
-        self.offset_x = int((canvas_w - self.draw_w) / 2)
-        self.offset_y = int((canvas_h - self.draw_h) / 2)
+        if self.fit_mode or not preserve_offset:
+            self.offset_x = int((canvas_w - self.draw_w) / 2)
+            self.offset_y = int((canvas_h - self.draw_h) / 2)
+        else:
+            self._clamp_offsets(canvas_w, canvas_h)
         render_state = (id(self.render_bgr), self.draw_w, self.draw_h, self.offset_x, self.offset_y)
         if render_state != self._last_render_state:
             rgb = cv2.cvtColor(self.render_bgr, cv2.COLOR_BGR2RGB)
@@ -204,6 +226,16 @@ class ImageViewer(ctk.CTkFrame):
             self.zoom_var.set(f"{self.scale * 100:.0f}%")
         self._redraw_manual_points()
 
+    def _clamp_offsets(self, canvas_w: int, canvas_h: int) -> None:
+        if self.draw_w <= canvas_w:
+            self.offset_x = int((canvas_w - self.draw_w) / 2)
+        else:
+            self.offset_x = max(canvas_w - self.draw_w, min(0, int(self.offset_x)))
+        if self.draw_h <= canvas_h:
+            self.offset_y = int((canvas_h - self.draw_h) / 2)
+        else:
+            self.offset_y = max(canvas_h - self.draw_h, min(0, int(self.offset_y)))
+
     def _update_manual_status(self) -> None:
         if self.mode_var.get() == "manual":
             self.status_var.set(t(self.language, "manual_points_status").format(count=len(self.manual_points), total=self.manual_point_count))
@@ -213,6 +245,7 @@ class ImageViewer(ctk.CTkFrame):
         for item in self.manual_items:
             self.canvas.delete(item)
         self.manual_items = []
+        self._clear_manual_hint()
         self._update_manual_status()
 
     def clear_measurement_marks(self) -> None:
@@ -240,6 +273,53 @@ class ImageViewer(ctk.CTkFrame):
             self.manual_items.append(self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, outline="#101820", fill="#ffde59", width=2))
             self.manual_items.append(self.canvas.create_text(x + 10, y - 10, text=str(idx), fill="#fffbdf", anchor="w"))
 
+    def _clear_manual_hint(self) -> None:
+        for item in self.manual_hint_items:
+            self.canvas.delete(item)
+        self.manual_hint_items = []
+
+    def _manual_hint_text(self) -> str:
+        step = min(len(self.manual_points) + 1, self.manual_point_count)
+        mode = self.manual_measurement_type
+        labels = {
+            "distance_horizontal": ("1. 왼쪽 경계", "2. 오른쪽 경계"),
+            "distance_vertical": ("1. 위쪽 경계", "2. 아래쪽 경계"),
+            "distance_both": ("1. 가로 시작", "2. 가로 끝", "3. 세로 시작", "4. 세로 끝"),
+            "hole_cd": ("1. 가로 시작", "2. 가로 끝", "3. 세로 시작", "4. 세로 끝"),
+            "crater": ("1. 왼쪽 foot", "2. 오른쪽 foot", "3. 상단 높이"),
+            "taper_single": ("1. 시작점", "2. 끝점"),
+            "taper_double": ("1. 좌측 시작", "2. 좌측 끝", "3. 우측 시작", "4. 우측 끝"),
+        }.get(mode, ("1. 시작점", "2. 끝점"))
+        return labels[step - 1] if 0 <= step - 1 < len(labels) else f"{step}. 점 선택"
+
+    def _update_manual_hint(self, x: int, y: int) -> None:
+        self._clear_manual_hint()
+        if self.mode_var.get() != "manual" or self.image_bgr is None or not self._is_canvas_inside_image(x, y):
+            return
+        text = self._manual_hint_text()
+        pad_x, pad_y = 8, 5
+        text_id = self.canvas.create_text(0, 0, text=text, fill="#eef6ff", font=("Malgun Gothic", 10), anchor="nw")
+        bbox = self.canvas.bbox(text_id)
+        if bbox is None:
+            self.canvas.delete(text_id)
+            return
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        left = min(max(x + 18, 4), max(4, self.canvas.winfo_width() - tw - pad_x * 2 - 4))
+        top = min(max(y + 12, 4), max(4, self.canvas.winfo_height() - th - pad_y * 2 - 4))
+        self.canvas.coords(text_id, left + pad_x, top + pad_y)
+        rect_id = self.canvas.create_rectangle(
+            left,
+            top,
+            left + tw + pad_x * 2,
+            top + th + pad_y * 2,
+            fill="#101820",
+            outline="#2f4154",
+            width=1,
+        )
+        self.canvas.tag_raise(text_id, rect_id)
+        self.manual_hint_items = [rect_id, text_id]
+
     def _manual_line_segments(self, canvas_points: list[Tuple[int, int]]) -> list[tuple[Tuple[int, int], Tuple[int, int]]]:
         mode = self.manual_measurement_type
         segments: list[tuple[Tuple[int, int], Tuple[int, int]]] = []
@@ -261,8 +341,12 @@ class ImageViewer(ctk.CTkFrame):
                 segments.append(horizontal(canvas_points[0], canvas_points[1]))
             else:
                 segments.append((canvas_points[0], canvas_points[1]))
+        if mode == "crater" and len(canvas_points) >= 3:
+            baseline_y = int(round((canvas_points[0][1] + canvas_points[1][1]) * 0.5))
+            top = canvas_points[2]
+            segments.append(vertical(top, (top[0], baseline_y)))
         if len(canvas_points) >= 4:
-            if mode in {"distance_both", "hole_cd", "crater"}:
+            if mode in {"distance_both", "hole_cd"}:
                 segments.append(vertical(canvas_points[2], canvas_points[3]))
             elif mode == "taper_double":
                 segments.append((canvas_points[2], canvas_points[3]))
@@ -284,6 +368,7 @@ class ImageViewer(ctk.CTkFrame):
         return max(0, min(w - 1, ix)), max(0, min(h - 1, iy))
 
     def _on_motion(self, event) -> None:
+        self._update_manual_hint(event.x, event.y)
         if self.on_hover_profile is None:
             return
         if not self._is_canvas_inside_image(event.x, event.y):
@@ -297,6 +382,7 @@ class ImageViewer(ctk.CTkFrame):
             self.on_hover_profile(*point)
 
     def _on_leave(self, _event) -> None:
+        self._clear_manual_hint()
         if self.on_hover_profile is not None and self._last_hover_xy != (None, None):
             self._last_hover_xy = (None, None)
             self.on_hover_profile(None, None)
@@ -314,6 +400,8 @@ class ImageViewer(ctk.CTkFrame):
                 points = list(self.manual_points[: self.manual_point_count])
                 self.clear_manual_points()
                 self.on_manual_points(points)
+            else:
+                self._update_manual_hint(event.x, event.y)
             return
         self.drag_start_canvas = (event.x, event.y)
         if self.drag_item:

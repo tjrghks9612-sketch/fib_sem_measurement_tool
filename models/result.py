@@ -299,10 +299,11 @@ class MeasurementResult:
 
     def compact_summary(self, unit: str, px_to_real: float) -> str:
         chunks: List[str] = []
-        if self.horizontal_cd and self.horizontal_cd.selected_px is not None:
+        has_composite_result = self.hole_cd is not None or self.crater is not None
+        if not has_composite_result and self.horizontal_cd and self.horizontal_cd.selected_px is not None:
             value = self.horizontal_cd.selected_px * px_to_real
             chunks.append(f"CD {value:.2f} {unit}")
-        if self.vertical_thk and self.vertical_thk.selected_px is not None:
+        if not has_composite_result and self.vertical_thk and self.vertical_thk.selected_px is not None:
             value = self.vertical_thk.selected_px * px_to_real
             chunks.append(f"THK {value:.2f} {unit}")
         if self.left_taper and self.left_taper.angle_horizontal is not None:

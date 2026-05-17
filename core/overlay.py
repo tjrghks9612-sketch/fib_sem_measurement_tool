@@ -19,16 +19,16 @@ from fib_sem_measurement_tool.ui.i18n import measurement_label, status_label, t,
 
 Color = Tuple[int, int, int]
 
-BG_PANEL: Color = (18, 24, 31)
+BG_PANEL: Color = (15, 20, 27)
 TEXT: Color = (244, 248, 252)
 MUTED: Color = (164, 176, 188)
-ROI_COLOR: Color = (90, 190, 255)
-CD_COLOR: Color = (45, 190, 255)
-THK_COLOR: Color = (90, 235, 160)
-TAPER_LEFT_COLOR: Color = (255, 214, 92)
-TAPER_RIGHT_COLOR: Color = (255, 150, 96)
-TAPER_HEIGHT_COLOR: Color = (188, 172, 255)
-ELLIPSE_COLOR: Color = (80, 205, 255)
+ROI_COLOR: Color = (112, 193, 255)
+CD_COLOR: Color = (64, 196, 255)
+THK_COLOR: Color = (112, 234, 178)
+TAPER_LEFT_COLOR: Color = (255, 216, 111)
+TAPER_RIGHT_COLOR: Color = (255, 155, 111)
+TAPER_HEIGHT_COLOR: Color = (190, 178, 255)
+ELLIPSE_COLOR: Color = (92, 211, 255)
 POINT_COLOR: Color = (244, 248, 252)
 FAIL_COLOR: Color = (95, 125, 255)
 SHADOW: Color = (8, 10, 14)
@@ -328,6 +328,24 @@ def _taper_fit_target_point(taper: TaperSideResult, settings: MeasurementSetting
     return target_x, target_y
 
 
+def _line_x_at_y(line, target_y: Optional[float]) -> Optional[tuple[float, float]]:
+    if not line or target_y is None:
+        return None
+    x1, y1, x2, y2 = [float(v) for v in line]
+    if abs(y2 - y1) <= 1e-6:
+        return (x1 + x2) * 0.5, float(target_y)
+    ratio = (float(target_y) - y1) / (y2 - y1)
+    return x1 + (x2 - x1) * ratio, float(target_y)
+
+
+def _draw_target_marker(image: np.ndarray, target: tuple[float, float], color: Color, radius: int = 22) -> Tuple[int, int, int, int]:
+    cx, cy = int(round(target[0])), int(round(target[1]))
+    _stroke_line(image, (cx - radius, cy), (cx + radius, cy), color, 2, 4)
+    cv2.circle(image, (cx, cy), 4, SHADOW, -1, cv2.LINE_AA)
+    cv2.circle(image, (cx, cy), 3, color, -1, cv2.LINE_AA)
+    return (cx - radius - 6, cy - 8, cx + radius + 6, cy + 8)
+
+
 def _draw_taper_height_guides(
     image: np.ndarray,
     roi: Sequence[int],
@@ -449,7 +467,7 @@ def _draw_hole_cd(image: np.ndarray, result, settings: MeasurementSettings) -> N
     _stroke_line(image, (int(round(x_min)), cy), (int(round(x_max)), cy), CD_COLOR, 2, 5)
     _stroke_line(image, (cx, int(round(y_min))), (cx, int(round(y_max))), THK_COLOR, 2, 5)
     if settings.show_labels:
-        label = f"Hole {_format_value(result.horizontal_px, settings)} x {_format_value(result.vertical_px, settings)}"
+        label = f"H {_format_value(result.horizontal_px, settings)}\nV {_format_value(result.vertical_px, settings)}"
         avoid = (
             _bbox_for_points([(int(round(x_min)), cy), (int(round(x_max)), cy)], 14),
             _bbox_for_points([(cx, int(round(y_min))), (cx, int(round(y_max)))], 14),
@@ -471,6 +489,7 @@ def _draw_line_tuple(image: np.ndarray, line, color: Color, thickness: int = 2, 
 
 
 def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> None:
+    avoid_boxes: list[Tuple[int, int, int, int]] = []
     if result.top_profile_points and result.baseline_line:
         top_points = sorted(((float(x), float(y)) for x, y in result.top_profile_points), key=lambda item: item[0])
         bx1, by1, bx2, by2 = result.baseline_line
@@ -499,6 +518,12 @@ def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> No
     if settings.show_fit_line:
         _draw_line_tuple(image, result.left_taper_line, TAPER_LEFT_COLOR, 1, 0.45)
         _draw_line_tuple(image, result.right_taper_line, TAPER_RIGHT_COLOR, 1, 0.45)
+    left_target = _line_x_at_y(result.left_taper_line, result.left_taper_measure_y)
+    right_target = _line_x_at_y(result.right_taper_line, result.right_taper_measure_y)
+    if left_target is not None:
+        avoid_boxes.append(_draw_target_marker(image, left_target, TAPER_LEFT_COLOR))
+    if right_target is not None:
+        avoid_boxes.append(_draw_target_marker(image, right_target, TAPER_RIGHT_COLOR))
     for point in ((result.left_foot_x, result.left_foot_y), (result.right_foot_x, result.right_foot_y)):
         if point[0] is not None and point[1] is not None:
             cv2.circle(image, (int(round(point[0])), int(round(point[1]))), 4, CD_COLOR, -1, cv2.LINE_AA)
@@ -513,7 +538,7 @@ def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> No
                 (int(max(x1, x2)) + 10, int((y1 + y2) * 0.5) - 10),
                 CD_COLOR,
                 scale=0.46,
-                avoid=(_bbox_for_points([p1, p2], 14),),
+                avoid=tuple(avoid_boxes + [_bbox_for_points([p1, p2], 14)]),
             )
         if result.thk_line and result.thk_px is not None:
             x1, y1, x2, y2 = result.thk_line
@@ -525,14 +550,28 @@ def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> No
                 (int(max(x1, x2)) + 8, int((y1 + y2) * 0.5)),
                 THK_COLOR,
                 scale=0.46,
-                avoid=(_bbox_for_points([p1, p2], 14),),
+                avoid=tuple(avoid_boxes + [_bbox_for_points([p1, p2], 14)]),
             )
         if result.left_taper_line and result.left_taper_angle_horizontal is not None:
             x1, y1, x2, y2 = result.left_taper_line
-            _label(image, f"L {result.left_taper_angle_horizontal:.1f} deg", (int(min(x1, x2)) - 10, int(min(y1, y2)) - 8), TAPER_LEFT_COLOR, scale=0.42)
+            _label(
+                image,
+                f"L {result.left_taper_angle_horizontal:.1f} deg",
+                (int(min(x1, x2)) - 10, int(min(y1, y2)) - 8),
+                TAPER_LEFT_COLOR,
+                scale=0.42,
+                avoid=tuple(avoid_boxes),
+            )
         if result.right_taper_line and result.right_taper_angle_horizontal is not None:
             x1, y1, x2, y2 = result.right_taper_line
-            _label(image, f"R {result.right_taper_angle_horizontal:.1f} deg", (int(max(x1, x2)) + 8, int(min(y1, y2)) - 8), TAPER_RIGHT_COLOR, scale=0.42)
+            _label(
+                image,
+                f"R {result.right_taper_angle_horizontal:.1f} deg",
+                (int(max(x1, x2)) + 8, int(min(y1, y2)) - 8),
+                TAPER_RIGHT_COLOR,
+                scale=0.42,
+                avoid=tuple(avoid_boxes),
+            )
 
 
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings, language: str) -> None:
@@ -548,9 +587,10 @@ def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: Measur
         f"{display_status}  {result.overall_confidence:.0f}%",
         measurement_label(language, settings.measurement_type),
     ]
-    if result.horizontal_cd and result.horizontal_cd.selected_px is not None:
+    has_composite_result = result.hole_cd is not None or result.crater is not None
+    if not has_composite_result and result.horizontal_cd and result.horizontal_cd.selected_px is not None:
         lines.append(f"CD {_format_value(result.horizontal_cd.selected_px, settings)}")
-    if result.vertical_thk and result.vertical_thk.selected_px is not None:
+    if not has_composite_result and result.vertical_thk and result.vertical_thk.selected_px is not None:
         lines.append(f"THK {_format_value(result.vertical_thk.selected_px, settings)}")
     if result.avg_taper_angle is not None:
         lines.append(f"{t(language, 'average_taper')} {result.avg_taper_angle:.1f} deg")
@@ -610,9 +650,10 @@ def draw_overlay(
             _label(canvas, t(language, "scale_bar"), (x1, y1 - 8), (255, 255, 90), scale=0.48)
     if result is not None:
         if settings.show_selected_edges:
-            if result.horizontal_cd:
+            has_composite_result = result.hole_cd is not None or result.crater is not None
+            if result.horizontal_cd and not has_composite_result:
                 _draw_distance(canvas, result.horizontal_cd, settings, CD_COLOR, "CD")
-            if result.vertical_thk:
+            if result.vertical_thk and not has_composite_result:
                 _draw_distance(canvas, result.vertical_thk, settings, THK_COLOR, "THK")
             if result.ellipse_cd:
                 _draw_ellipse_cd(canvas, result.ellipse_cd, settings, language)
