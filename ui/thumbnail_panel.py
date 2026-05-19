@@ -162,9 +162,7 @@ class ThumbnailPanel(ctk.CTkFrame):
             self.visible_indices.append(index)
             self._create_card(index, item, settings)
 
-        self.count_var.set(f"{len(self.visible_indices)} / {len(self.items)} {t(self.language, 'images_unit')}")
-        selected_count = sum(1 for item in self.items if item.selected)
-        self.selection_var.set(f"{selected_count} / {len(self.items)}")
+        self._update_counts()
 
     def _status_color(self, status: str) -> str:
         return {
@@ -186,10 +184,13 @@ class ThumbnailPanel(ctk.CTkFrame):
             corner_radius=6,
         )
         card.pack(fill="x", pady=5)
-        self.card_refs[index] = card
+        refs = {"frame": card}
+        self.card_refs[index] = refs
         card.grid_columnconfigure(2, weight=1)
         var = tk.BooleanVar(value=item.selected)
+        refs["check_var"] = var
         check = ctk.CTkCheckBox(card, text="", width=22, variable=var, command=lambda i=index, v=var: self._toggle(i, v))
+        refs["check"] = check
         check.grid(row=0, column=0, rowspan=5, padx=(8, 4), pady=8, sticky="ns")
 
         preview = self.render_thumbnail(item, settings)
@@ -199,32 +200,35 @@ class ThumbnailPanel(ctk.CTkFrame):
             thumb = ctk.CTkLabel(card, text="", image=image)
         else:
             thumb = ctk.CTkLabel(card, text=t(self.language, "no_preview"), width=124, height=80)
+        refs["thumb"] = thumb
         thumb.grid(row=0, column=1, rowspan=5, padx=6, pady=8)
 
         number = ctk.CTkLabel(card, text=f"{index + 1:02d}", fg_color="#164c94", corner_radius=4, width=28)
+        refs["number"] = number
         number.grid(row=0, column=2, sticky="w", padx=(2, 0), pady=(8, 0))
         name = ctk.CTkLabel(card, text=item.file_name, anchor="w", font=ctk.CTkFont(size=12, weight="bold"))
+        refs["name"] = name
         name.grid(row=0, column=2, sticky="ew", padx=(36, 8), pady=(8, 0))
 
         type_text = measurement_label(self.language, settings.measurement_type)
         roi_text = t(self.language, "roi_exists") if settings.roi else t(self.language, "roi_missing")
         source_text = settings_source_label(self.language, settings.settings_source)
-        ctk.CTkLabel(card, text=f"{type_text} | {roi_text} | {source_text}", anchor="w", text_color="#c7d2df").grid(
-            row=2, column=2, sticky="ew", padx=2
-        )
+        meta_label = ctk.CTkLabel(card, text=f"{type_text} | {roi_text} | {source_text}", anchor="w", text_color="#c7d2df")
+        refs["meta"] = meta_label
+        meta_label.grid(row=2, column=2, sticky="ew", padx=2)
         calibration_text = {
             "not_calibrated": t(self.language, "not_calibrated"),
             "calibrated": t(self.language, "calibrated"),
         }.get(settings.calibration.status, settings.calibration.status)
-        ctk.CTkLabel(card, text=f"{t(self.language, 'calibration')}: {calibration_text}", anchor="w", text_color="#8ea0b1").grid(
-            row=3, column=2, sticky="ew", padx=2
-        )
+        calibration_label = ctk.CTkLabel(card, text=f"{t(self.language, 'calibration')}: {calibration_text}", anchor="w", text_color="#8ea0b1")
+        refs["calibration"] = calibration_label
+        calibration_label.grid(row=3, column=2, sticky="ew", padx=2)
 
         status = item.result.status if item.result else "Not measured"
         summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else t(self.language, "before_measurement")
-        ctk.CTkLabel(card, text=summary, anchor="w", text_color=self._status_color(status)).grid(
-            row=4, column=2, sticky="ew", padx=2, pady=(0, 8)
-        )
+        summary_label = ctk.CTkLabel(card, text=summary, anchor="w", text_color=self._status_color(status))
+        refs["summary"] = summary_label
+        summary_label.grid(row=4, column=2, sticky="ew", padx=2, pady=(0, 8))
 
         self._bind_card_selection(card, index)
 
@@ -234,14 +238,72 @@ class ThumbnailPanel(ctk.CTkFrame):
         previous = self.current_index
         self.current_index = current_index
         for index in (previous, current_index):
-            card = self.card_refs.get(index)
-            if card is None:
+            refs = self.card_refs.get(index)
+            if refs is None:
                 continue
+            card = refs["frame"]
             selected = index == current_index
             card.configure(
                 border_color="#0a84ff" if selected else "#213243",
                 border_width=2 if selected else 1,
             )
+
+    def update_item(self, index: int) -> None:
+        if not (0 <= index < len(self.items)):
+            return
+        item = self.items[index]
+        settings = self.resolve_settings(item)
+        passes_filter = self._passes_filter(item, settings)
+        is_visible = index in self.card_refs
+        if passes_filter != is_visible:
+            self._refresh_cards()
+            return
+        if not passes_filter:
+            self._update_counts()
+            return
+
+        refs = self.card_refs[index]
+        card = refs["frame"]
+        selected = index == self.current_index
+        card.configure(
+            border_color="#0a84ff" if selected else "#213243",
+            border_width=2 if selected else 1,
+        )
+        refs["check_var"].set(bool(item.selected))
+        refs["number"].configure(text=f"{index + 1:02d}")
+        refs["name"].configure(text=item.file_name)
+
+        preview = self.render_thumbnail(item, settings)
+        if preview is not None:
+            image = ctk.CTkImage(light_image=preview, dark_image=preview, size=(124, 80))
+            self.image_refs.append(image)
+            refs["thumb"].configure(text="", image=image)
+        else:
+            refs["thumb"].configure(text=t(self.language, "no_preview"), image=None)
+
+        type_text = measurement_label(self.language, settings.measurement_type)
+        roi_text = t(self.language, "roi_exists") if settings.roi else t(self.language, "roi_missing")
+        source_text = settings_source_label(self.language, settings.settings_source)
+        refs["meta"].configure(text=f"{type_text} | {roi_text} | {source_text}")
+
+        calibration_text = {
+            "not_calibrated": t(self.language, "not_calibrated"),
+            "calibrated": t(self.language, "calibrated"),
+        }.get(settings.calibration.status, settings.calibration.status)
+        refs["calibration"].configure(text=f"{t(self.language, 'calibration')}: {calibration_text}")
+
+        status = item.result.status if item.result else "Not measured"
+        summary = item.result.compact_summary(settings.calibration.unit, settings.calibration.px_to_real) if item.result else t(self.language, "before_measurement")
+        refs["summary"].configure(text=summary, text_color=self._status_color(status))
+        self._update_counts()
+
+    def update_current_card(self) -> None:
+        self.update_item(self.current_index)
+
+    def _update_counts(self) -> None:
+        self.count_var.set(f"{len(self.visible_indices)} / {len(self.items)} {t(self.language, 'images_unit')}")
+        selected_count = sum(1 for item in self.items if item.selected)
+        self.selection_var.set(f"{selected_count} / {len(self.items)}")
 
     def _bind_card_selection(self, widget, index: int) -> None:
         widget.bind("<Button-1>", lambda _event, i=index: self.on_select_image(i), add="+")

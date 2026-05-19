@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from collections import OrderedDict
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Dict, List, Optional
@@ -70,11 +71,14 @@ class MainWindow(ctk.CTk):
         self.thumbnail_overlay_cache_limit = 32
         self._auto_measure_after_id = None
         self._auto_measure_token = 0
+        self._auto_measure_future: Optional[Future] = None
+        self._auto_measure_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fib-sem-auto-measure")
         self.status_var = ctk.StringVar(value=t(self.language, "initial_status"))
         self.current_file_var = ctk.StringVar(value=t(self.language, "current_file_none"))
         self.language_var = ctk.StringVar(value=language_label(self.language))
 
         self._build()
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build(self) -> None:
         self.configure(fg_color="#08111a")
@@ -315,6 +319,7 @@ class MainWindow(ctk.CTk):
         self.load_current_image()
         if previous_index != self.current_index:
             self.thumbnail_panel.set_current_index(self.current_index)
+            self.update_thumbnail_item(self.current_index)
 
     def previous_image(self) -> None:
         if not self.image_items:
@@ -397,9 +402,6 @@ class MainWindow(ctk.CTk):
         if update_option_settings:
             self.option_panel.set_settings(settings)
         self.option_panel.set_candidate_summary(item.result, settings)
-        if self.image_items:
-            self.thumbnail_overlay_cache.pop(self._thumbnail_overlay_cache_key(item, settings), None)
-            self.refresh_thumbnail_panel()
 
     def _render_cache_key(self, item: ImageItem, settings: MeasurementSettings):
         scale_bar_bbox = self.scale_bar_bboxes.get(item.image_path)
@@ -620,6 +622,16 @@ class MainWindow(ctk.CTk):
             self.get_thumbnail_preview,
         )
 
+    def update_thumbnail_item(self, index: Optional[int] = None) -> None:
+        if index is None:
+            index = self.current_index
+        if not (0 <= index < len(self.image_items)):
+            return
+        item = self.image_items[index]
+        settings = self.resolve_settings_for_item(item)
+        self.thumbnail_overlay_cache.pop(self._thumbnail_overlay_cache_key(item, settings), None)
+        self.thumbnail_panel.update_item(index)
+
     def refresh_result_table(self) -> None:
         return
 
@@ -629,13 +641,14 @@ class MainWindow(ctk.CTk):
         self.refresh_result_table()
 
     def _cancel_auto_measure(self) -> None:
-        if self._auto_measure_after_id is None:
-            return
-        try:
-            self.after_cancel(self._auto_measure_after_id)
-        except ValueError:
-            pass
-        self._auto_measure_after_id = None
+        if self._auto_measure_after_id is not None:
+            try:
+                self.after_cancel(self._auto_measure_after_id)
+            except ValueError:
+                pass
+            self._auto_measure_after_id = None
+        if self._auto_measure_future is not None and not self._auto_measure_future.done():
+            self._auto_measure_future.cancel()
 
     def _schedule_auto_measure(self) -> None:
         item = self.current_item()
@@ -649,22 +662,49 @@ class MainWindow(ctk.CTk):
         self._cancel_auto_measure()
         self._auto_measure_token += 1
         token = self._auto_measure_token
-        self._auto_measure_after_id = self.after(500, lambda: self._run_auto_measure(token))
+        signature = self._settings_signature(settings)
+        self._auto_measure_after_id = self.after(1200, lambda: self._run_auto_measure(token, item.image_path, signature))
 
-    def _run_auto_measure(self, token: int) -> None:
+    def _run_auto_measure(self, token: int, image_path: str, signature) -> None:
         self._auto_measure_after_id = None
         if token != self._auto_measure_token:
             return
         item = self.current_item()
-        if item is None:
+        if item is None or item.image_path != image_path:
             return
         settings = self.resolve_settings_for_item(item)
-        if settings.roi is None:
+        if settings.roi is None or self._settings_signature(settings) != signature:
             return
-        image = self.load_image_cached(item.image_path)
-        item.result = run_measurement(image, settings)
-        self.load_current_image()
-        self.refresh_thumbnail_panel()
+        image = self.load_image_cached(item.image_path).copy()
+        worker_settings = settings.clone()
+        future = self._auto_measure_executor.submit(run_measurement, image, worker_settings)
+        self._auto_measure_future = future
+        future.add_done_callback(lambda done, tkn=token, path=image_path, sig=signature: self._queue_auto_measure_result(tkn, path, sig, done))
+
+    def _queue_auto_measure_result(self, token: int, image_path: str, signature, future: Future) -> None:
+        try:
+            self.after(0, self._finish_auto_measure, token, image_path, signature, future)
+        except RuntimeError:
+            return
+
+    def _finish_auto_measure(self, token: int, image_path: str, signature, future: Future) -> None:
+        if future.cancelled() or token != self._auto_measure_token:
+            return
+        item = self.current_item()
+        if item is None or item.image_path != image_path:
+            return
+        settings = self.resolve_settings_for_item(item)
+        if self._settings_signature(settings) != signature:
+            return
+        try:
+            result = future.result()
+        except Exception as exc:
+            self.set_status(str(exc))
+            return
+        item.result = result
+        self.render_cache.clear()
+        self.render_current_image(update_option_settings=False)
+        self.update_thumbnail_item(self.current_index)
         self.refresh_result_table()
         self.set_status(t(self.language, "option_changed").format(
             file_name=item.file_name,
@@ -751,8 +791,9 @@ class MainWindow(ctk.CTk):
         settings.roi = clean_roi
         settings.roi_source_image = item.file_name
         item.result = None
+        self.render_cache.clear()
         self.set_status(t(self.language, "roi_applied"))
-        self.render_current_image()
+        self.render_current_image(update_option_settings=False)
         self._schedule_auto_measure()
 
     def on_overlay_toggled(self, enabled: bool) -> None:
@@ -776,6 +817,7 @@ class MainWindow(ctk.CTk):
             self.set_status(str(result.get("message", t(self.language, "scale_bar_failed"))))
             messagebox.showinfo(t(self.language, "scale_bar_detection"), str(result.get("message", t(self.language, "scale_bar_failed"))))
         self.render_current_image()
+        self.update_thumbnail_item(self.current_index)
 
     def on_manual_points(self, points: list[tuple[int, int]]) -> None:
         item = self.current_item()
@@ -787,7 +829,7 @@ class MainWindow(ctk.CTk):
         self.render_cache.clear()
         self.thumbnail_overlay_cache.clear()
         self.render_current_image()
-        self.refresh_thumbnail_panel()
+        self.update_thumbnail_item(self.current_index)
         self.refresh_result_table()
         self.set_status(t(self.language, "manual_measurement_complete").format(file_name=item.file_name))
 
@@ -804,7 +846,7 @@ class MainWindow(ctk.CTk):
         self.thumbnail_overlay_cache.clear()
         self._last_measured_settings = None
         self.render_current_image()
-        self.refresh_thumbnail_panel()
+        self.update_thumbnail_item(self.current_index)
         self.refresh_result_table()
         self.set_status(t(self.language, "manual_clear"))
 
@@ -864,7 +906,7 @@ class MainWindow(ctk.CTk):
         self.render_cache.clear()
         self.thumbnail_overlay_cache.clear()
         self.render_current_image()
-        self.refresh_thumbnail_panel()
+        self.update_thumbnail_item(self.current_index)
 
     def measure_scope(self, force_scope: Optional[str] = None) -> None:
         if not self.image_items:
@@ -892,7 +934,10 @@ class MainWindow(ctk.CTk):
                 failures += 1
         self._remember_current_measured_settings()
         self.load_current_image()
-        self.refresh_thumbnail_panel()
+        if scope in {"all", "selected"}:
+            self.refresh_thumbnail_panel()
+        else:
+            self.update_thumbnail_item(self.current_index)
         self.refresh_result_table()
         roi_message = t(self.language, "roi_applied_count").format(count=applied_roi_count) if applied_roi_count else ""
         failure_message = t(self.language, "failures_count").format(count=failures) if failures else ""
@@ -914,3 +959,8 @@ class MainWindow(ctk.CTk):
         export_results_to_csv(path, self.image_items, self.global_settings)
         self.set_status(t(self.language, "csv_saved").format(path=path))
         messagebox.showinfo(t(self.language, "csv_saved_title"), t(self.language, "csv_saved_message"))
+
+    def on_close(self) -> None:
+        self._cancel_auto_measure()
+        self._auto_measure_executor.shutdown(wait=False, cancel_futures=True)
+        self.destroy()
