@@ -24,8 +24,8 @@
 
 ## 세로 THK 1.png
 - expected_mode: 세로 THK
-- measured_values: vertical_thk_px=235
-- confidence: 100
+- measured_values: vertical_thk_px=234.2
+- confidence: 99.14
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/세로 THK 1_overlay.png
@@ -35,8 +35,8 @@
 
 ## 세로 THK 2.png
 - expected_mode: 세로 THK
-- measured_values: vertical_thk_px=201
-- confidence: 100
+- measured_values: vertical_thk_px=211.6
+- confidence: 99.64
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/세로 THK 2_overlay.png
@@ -46,25 +46,25 @@
 
 ## 가로+세로 1.png
 - expected_mode: 가로+세로
-- measured_values: horizontal_cd_px=418.3, vertical_thk_px=653
-- confidence: 92.1
-- status: OK
+- measured_values: horizontal_cd_px=418.3, vertical_thk_px=485.6
+- confidence: 42.92
+- status: Review Needed
 - warning_message: -
 - overlay_path: validation_outputs/overlays/가로+세로 1_overlay.png
 - target_overlay_path: -
-- validation: pass
-- failure_reason: -
+- validation: partial
+- failure_reason: low combined confidence
 
 ## 가로+세로 2.png
 - expected_mode: 가로+세로
-- measured_values: horizontal_cd_px=466.9, vertical_thk_px=669
-- confidence: 92.94
-- status: OK
+- measured_values: horizontal_cd_px=466.9, vertical_thk_px=548.2
+- confidence: 43.67
+- status: Review Needed
 - warning_message: -
 - overlay_path: validation_outputs/overlays/가로+세로 2_overlay.png
 - target_overlay_path: -
-- validation: pass
-- failure_reason: -
+- validation: partial
+- failure_reason: low combined confidence
 
 ## Taper 1.png
 - expected_mode: Taper

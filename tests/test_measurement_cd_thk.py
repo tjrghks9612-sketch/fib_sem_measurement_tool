@@ -161,6 +161,45 @@ class CdThkMeasurementTest(unittest.TestCase):
         self.assertAlmostEqual(result.selected_px, 4.8, delta=0.01)
         self.assertEqual(result.valid_count, 5)
 
+    def test_vertical_thk_selected_pairs_follow_wavy_boundaries(self) -> None:
+        width, height = 120, 100
+        image = np.full((height, width), 30, dtype=np.uint8)
+        for x in range(width):
+            top = int(round(22 + 4 * np.sin(x / 9.0)))
+            bottom = int(round(66 + 3 * np.sin(x / 11.0 + 0.7)))
+            image[top:bottom, x] = 190
+        settings = MeasurementSettings(
+            roi=(0, 0, width - 1, height - 1),
+            measurement_type="distance_vertical",
+            minimum_grayscale_delta=25.0,
+        )
+
+        result = measure_vertical_thk(image, settings.roi, settings)
+        top_y = np.asarray([pair.first.image_y for pair in result.selected_pairs], dtype=np.float64)
+        bottom_y = np.asarray([pair.second.image_y for pair in result.selected_pairs], dtype=np.float64)
+
+        self.assertEqual(result.status, "OK")
+        self.assertGreater(float(np.ptp(top_y)), 1.0)
+        self.assertGreater(float(np.ptp(bottom_y)), 1.0)
+        self.assertAlmostEqual(result.selected_px, 44.0, delta=3.0)
+
+    def test_vertical_thk_flat_synthetic_image_can_remain_straight(self) -> None:
+        image = np.full((80, 90), 30, dtype=np.uint8)
+        image[20:60, :] = 190
+        settings = MeasurementSettings(
+            roi=(0, 0, 89, 79),
+            measurement_type="distance_vertical",
+            minimum_grayscale_delta=25.0,
+        )
+
+        result = measure_vertical_thk(image, settings.roi, settings)
+        top_range = max(pair.first.image_y for pair in result.selected_pairs) - min(pair.first.image_y for pair in result.selected_pairs)
+        bottom_range = max(pair.second.image_y for pair in result.selected_pairs) - min(pair.second.image_y for pair in result.selected_pairs)
+
+        self.assertEqual(result.status, "OK")
+        self.assertLessEqual(top_range, 0.5)
+        self.assertLessEqual(bottom_range, 0.5)
+
     def test_distance_both_runs_cd_and_thk_independently_on_same_roi(self) -> None:
         settings = MeasurementSettings(
             roi=(0, 0, 119, 99),

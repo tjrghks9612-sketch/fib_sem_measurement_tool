@@ -373,7 +373,7 @@ class OptionPanel(ctk.CTkFrame):
                 self.after_cancel(self._slider_change_after_id)
             except ValueError:
                 pass
-        self._slider_change_after_id = self.after(120, self._flush_slider_changed)
+        self._slider_change_after_id = self.after(450, self._flush_slider_changed)
 
     def _flush_slider_changed(self) -> None:
         self._slider_change_after_id = None

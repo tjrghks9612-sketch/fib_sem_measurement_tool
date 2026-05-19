@@ -1000,6 +1000,7 @@ def select_projection_layer_pairs_per_scanline(
     scan_result: EdgeScanResult,
     max_jump_px: float = DEFAULT_MAX_JUMP_PX,
     min_coverage: float = 0.45,
+    allow_synthetic_fallback: bool = True,
 ) -> List[PairCandidate]:
     if scan_result.scan_axis != "vertical" or scan_result.scanned_line_count < 128:
         return []
@@ -1024,7 +1025,16 @@ def select_projection_layer_pairs_per_scanline(
         second_candidates.append(second)
 
     selected_coverage = float(len(first_candidates) / scan_result.scanned_line_count) if scan_result.scanned_line_count else 0.0
-    if selected_coverage < float(min_coverage) and scan_result.scanned_line_count >= 256:
+    scan_span_ratio = 0.0
+    if first_candidates:
+        scan_indices = [int(candidate.scan_index) for candidate in first_candidates]
+        scan_span_ratio = float((max(scan_indices) - min(scan_indices) + 1) / scan_result.scanned_line_count)
+    interpolate_sparse_boundary = False
+    if (
+        allow_synthetic_fallback
+        and selected_coverage < float(min_coverage)
+        and scan_result.scanned_line_count >= 256
+    ):
         first_candidates = [
             _candidate_from_position(scan_result, scan_index, float(first_cluster["center"]))
             for scan_index in _scan_indices(scan_result)
@@ -1034,9 +1044,15 @@ def select_projection_layer_pairs_per_scanline(
             for scan_index in _scan_indices(scan_result)
         ]
     elif selected_coverage < float(min_coverage):
-        return []
+        if selected_coverage >= 0.10 and scan_span_ratio >= 0.70:
+            interpolate_sparse_boundary = True
+        else:
+            return []
 
     max_gap, smooth_window = _postprocess_defaults(scan_result.scan_axis)
+    if interpolate_sparse_boundary:
+        max_gap = max(max_gap, int(scan_result.scanned_line_count))
+        smooth_window = max(smooth_window, 7)
     first = postprocess_boundary_candidates(
         scan_result,
         _repair_boundary_jumps(scan_result, first_candidates, "first", max_jump_px),

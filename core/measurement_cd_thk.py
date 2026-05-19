@@ -20,6 +20,7 @@ MIN_COVERAGE_FOR_OK = 0.45
 THK_CD_MARGIN_RATIO = 0.075
 THK_CD_MARGIN_MIN_PX = 3.0
 THK_CD_MARGIN_MAX_PX = 5.0
+MIN_VERTICAL_CONTOUR_COVERAGE = 0.45
 
 
 def _status_from_candidates(selected_count: int, coverage: float) -> str:
@@ -54,6 +55,12 @@ def _nearest_selected_pair(selected_pairs: Sequence[PairCandidate], selected_px:
     if not selected_pairs or selected_px is None:
         return None
     return min(selected_pairs, key=lambda pair: abs(pair.distance - selected_px))
+
+
+def _pair_coverage(selected_pairs: Sequence[PairCandidate], scanned_line_count: int) -> float:
+    if scanned_line_count <= 0:
+        return 0.0
+    return float(len(selected_pairs) / scanned_line_count)
 
 
 def _boundary_coordinate(orientation: str, pair: PairCandidate, boundary: str) -> float:
@@ -175,6 +182,7 @@ def _measure_distance(
     max_jump_px = float(getattr(settings, "max_jump_px", 28.0))
     selected_pairs = []
     edge_scan_mode = getattr(settings, "edge_scan_mode", "auto")
+    projection_synthetic_fallback = False
     if edge_scan_mode in {"outside_to_center", "center_to_outside"}:
         selected_pairs = select_first_valid_boundary_pairs_per_scanline(
             scan,
@@ -183,9 +191,30 @@ def _measure_distance(
             max_jump_px=max_jump_px,
         )
     elif orientation == "vertical":
-        selected_pairs = select_projection_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
-        if not selected_pairs:
+        projection_pairs = select_projection_layer_pairs_per_scanline(
+            scan,
+            max_jump_px=max_jump_px,
+            allow_synthetic_fallback=False,
+        )
+        stable_pairs = select_stable_region_pairs_per_scanline(
+            scan,
+            first_direction,
+            second_direction,
+            max_jump_px=max_jump_px,
+        )
+        if _pair_coverage(projection_pairs, scan.scanned_line_count) >= MIN_VERTICAL_CONTOUR_COVERAGE:
+            selected_pairs = projection_pairs
+        elif stable_pairs:
+            selected_pairs = stable_pairs
+        else:
             selected_pairs = select_density_layer_pairs_per_scanline(scan, max_jump_px=max_jump_px)
+        if not selected_pairs:
+            selected_pairs = select_projection_layer_pairs_per_scanline(
+                scan,
+                max_jump_px=max_jump_px,
+                allow_synthetic_fallback=True,
+            )
+            projection_synthetic_fallback = bool(selected_pairs)
     if not selected_pairs:
         selected_pairs = select_stable_region_pairs_per_scanline(
             scan,
@@ -245,6 +274,8 @@ def _measure_distance(
     result.status = _status_from_candidates(result.valid_count, selected_pair_coverage)
     if angle_filtered_count:
         result.warning_message = f"{orientation} boundary angle filter removed {angle_filtered_count} scanlines"
+    elif orientation == "vertical" and projection_synthetic_fallback:
+        result.warning_message = "vertical projection synthetic fallback used"
     return result
 
 
