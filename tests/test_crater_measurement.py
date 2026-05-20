@@ -134,6 +134,10 @@ class CraterMeasurementTest(unittest.TestCase):
             self.assertNotEqual(result.status, "Fail")
             self.assertGreater(result.crater.cd_px, 100)
             self.assertGreater(result.crater.thk_px, 20)
+            if path.endswith("Crater 1.png"):
+                self.assertGreater(result.crater.cd_px, 700)
+            if path.endswith("Crater 2.png"):
+                self.assertGreater(result.crater.cd_px, 900)
 
 
 if __name__ == "__main__":

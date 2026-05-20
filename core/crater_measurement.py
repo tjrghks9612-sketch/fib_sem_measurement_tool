@@ -316,7 +316,7 @@ def _largest_height_region(heights: np.ndarray) -> Optional[tuple[int, int]]:
     max_height = float(np.nanmax(heights))
     if max_height < 6.0:
         return None
-    threshold = max(5.0, max_height * 0.10)
+    threshold = max(5.0, max_height * 0.005)
     mask = finite & (heights >= threshold)
     runs: List[tuple[int, int]] = []
     start: Optional[int] = None
