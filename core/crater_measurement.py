@@ -316,7 +316,7 @@ def _largest_height_region(heights: np.ndarray) -> Optional[tuple[int, int]]:
     max_height = float(np.nanmax(heights))
     if max_height < 6.0:
         return None
-    threshold = max(5.0, max_height * 0.10)
+    threshold = max(5.0, max_height * 0.005)
     mask = finite & (heights >= threshold)
     runs: List[tuple[int, int]] = []
     start: Optional[int] = None
@@ -333,85 +333,6 @@ def _largest_height_region(heights: np.ndarray) -> Optional[tuple[int, int]]:
     center = int(np.nanargmax(heights))
     containing = [run for run in runs if run[0] <= center <= run[1]]
     return max(containing or runs, key=lambda run: run[1] - run[0])
-
-
-def _extend_region_to_baseline(heights: np.ndarray, left: int, right: int) -> tuple[int, int]:
-    segment = heights[left : right + 1]
-    finite_segment = segment[np.isfinite(segment)]
-    if finite_segment.size == 0:
-        return left, right
-
-    max_height = float(np.max(finite_segment))
-    if max_height <= 0.0:
-        return left, right
-
-    foot_threshold = max(2.0, max_height * 0.035)
-    fallback_threshold = max(4.0, max_height * 0.08)
-    max_extra = max(12, int((right - left + 1) * 0.55))
-
-    def extrapolated_foot(start: int, step: int) -> int:
-        inward_step = -step
-        values: list[float] = []
-        for distance in range(0, min(18, max_extra) + 1):
-            idx = start + inward_step * distance
-            if idx < 0 or idx >= heights.size or not np.isfinite(heights[idx]):
-                continue
-            values.append(float(heights[idx]))
-        if len(values) < 5:
-            return start
-        distances = np.arange(len(values), dtype=np.float32)
-        slope, intercept = np.polyfit(distances, np.asarray(values, dtype=np.float32), 1)
-        if slope <= 0.20:
-            return start
-        edge_height = max(0.0, float(intercept))
-        extension = int(np.ceil(edge_height / float(slope) * 0.70))
-        extension = max(0, min(max_extra, extension))
-        return max(0, min(heights.size - 1, start + step * extension))
-
-    def find_foot(start: int, step: int) -> int:
-        best = start
-        best_height = float("inf")
-        gap_count = 0
-        for distance in range(1, max_extra + 1):
-            idx = start + step * distance
-            if idx < 0 or idx >= heights.size:
-                break
-            value = float(heights[idx]) if np.isfinite(heights[idx]) else float("nan")
-            if not np.isfinite(value):
-                gap_count += 1
-                if gap_count > 5:
-                    break
-                continue
-            gap_count = 0
-            if value < best_height:
-                best_height = value
-                best = idx
-            if value <= foot_threshold:
-                return idx
-            # Past the shoulder, an increasing height means we have probably crossed into
-            # another structure rather than the same dome approaching the baseline.
-            if distance > 4 and value > max_height * 0.25 and best_height <= fallback_threshold:
-                break
-        if best_height <= fallback_threshold:
-            return best
-        return extrapolated_foot(start, step)
-
-    expanded_left = find_foot(left, -1)
-    expanded_right = find_foot(right, 1)
-    if expanded_right <= expanded_left:
-        return left, right
-    return expanded_left, expanded_right
-
-
-def _profile_points_to_baseline(top_y: np.ndarray, baseline_y: np.ndarray, left: int, right: int) -> np.ndarray:
-    profile = top_y.copy()
-    indexes = np.arange(profile.size, dtype=np.float32)
-    finite = np.isfinite(profile)
-    if np.any(finite):
-        profile[~finite] = np.interp(indexes[~finite], indexes[finite], profile[finite])
-    profile[left] = baseline_y[left]
-    profile[right] = baseline_y[right]
-    return profile
 
 
 def _profile_smoothness(profile_y: np.ndarray, left: int, right: int) -> float:
@@ -513,13 +434,9 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
     left, right = region
     if right - left < max(20, int(w * 0.08)):
         return _empty_result("crater_profile_coverage_low")
-    left, right = _extend_region_to_baseline(heights, left, right)
-    if right - left < max(20, int(w * 0.08)):
-        return _empty_result("crater_profile_coverage_low")
 
-    display_top_y = _profile_points_to_baseline(top_y, baseline_y, left, right)
-    top_profile_points = [(float(x1 + x), float(y1 + display_top_y[x])) for x in range(left, right + 1) if np.isfinite(display_top_y[x])]
-    left_boundary_local, right_boundary_local = _extract_side_boundaries(dark_mask, display_top_y, baseline_y, left, right)
+    top_profile_points = [(float(x1 + x), float(y1 + top_y[x])) for x in range(left, right + 1) if np.isfinite(top_y[x])]
+    left_boundary_local, right_boundary_local = _extract_side_boundaries(dark_mask, top_y, baseline_y, left, right)
     left_boundary_points = [(float(x1 + x), float(y1 + y)) for x, y in left_boundary_local]
     right_boundary_points = [(float(x1 + x), float(y1 + y)) for x, y in right_boundary_local]
     coverage = float(len(top_profile_points) / max(1, right - left + 1) * 100.0)

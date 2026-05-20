@@ -112,8 +112,8 @@
 
 ## Crater 1.png
 - expected_mode: Crater
-- measured_values: crater_cd_px=1054, crater_thk_px=130.7, crater_left_taper_deg=40.57, crater_right_taper_deg=40.67
-- confidence: 89.15
+- measured_values: crater_cd_px=717, crater_thk_px=154.9, crater_left_taper_deg=40.57, crater_right_taper_deg=40.67
+- confidence: 84.99
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 1_overlay.png
@@ -123,8 +123,8 @@
 
 ## Crater 2.png
 - expected_mode: Crater
-- measured_values: crater_cd_px=1173, crater_thk_px=143.8, crater_left_taper_deg=31.51, crater_right_taper_deg=31.85
-- confidence: 93.62
+- measured_values: crater_cd_px=904, crater_thk_px=152.8, crater_left_taper_deg=31.51, crater_right_taper_deg=31.85
+- confidence: 93.6
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 2_overlay.png
