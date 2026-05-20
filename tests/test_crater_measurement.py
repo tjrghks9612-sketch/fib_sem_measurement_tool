@@ -61,6 +61,8 @@ class CraterMeasurementTest(unittest.TestCase):
         self.assertIn("crater_cd_px", CSV_COLUMNS)
         self.assertIn("crater_thk_px", CSV_COLUMNS)
         self.assertIn("crater_taper_height_percent", CSV_COLUMNS)
+        self.assertIn("crater_baseline_coverage", CSV_COLUMNS)
+        self.assertIn("crater_baseline_warning_code", CSV_COLUMNS)
         self.assertGreater(row["crater_cd_px"], 0)
         self.assertGreater(row["crater_thk_px"], 0)
         self.assertEqual(row["crater_taper_height_percent"], 15.0)
@@ -77,6 +79,36 @@ class CraterMeasurementTest(unittest.TestCase):
         self.assertEqual(high.crater.taper_height_percent, 55.0)
         self.assertNotEqual(low.crater.left_taper_measure_y, high.crater.left_taper_measure_y)
         self.assertLess(high.crater.left_taper_measure_y, low.crater.left_taper_measure_y)
+        self.assertAlmostEqual(low.crater.cd_px, high.crater.cd_px, delta=1e-6)
+        self.assertAlmostEqual(low.crater.thk_px, high.crater.thk_px, delta=1e-6)
+
+    def test_crater_partial_dome_roi_warns_about_baseline(self) -> None:
+        image = synthetic_crater()
+        roi = (80, 35, 340, 155)
+        result = run_measurement(image, MeasurementSettings(roi=roi, measurement_type="crater", minimum_grayscale_delta=35))
+
+        self.assertIsNotNone(result.crater)
+        self.assertIn(result.status, {"Check", "Review Needed"})
+        self.assertIn("crater_partial_dome_detected", result.warning_message)
+        self.assertGreater(result.crater.baseline_candidate_count, 0)
+        self.assertGreater(result.crater.baseline_coverage, 0.0)
+
+    def test_crater_wider_roi_improves_baseline_coverage(self) -> None:
+        image = synthetic_crater()
+        narrow = run_measurement(
+            image,
+            MeasurementSettings(roi=(12, 35, 407, 155), measurement_type="crater", minimum_grayscale_delta=35),
+        )
+        wide = run_measurement(
+            image,
+            MeasurementSettings(roi=(12, 35, 407, 225), measurement_type="crater", minimum_grayscale_delta=35),
+        )
+
+        self.assertIsNotNone(narrow.crater)
+        self.assertIsNotNone(wide.crater)
+        self.assertIn("crater_partial_dome_detected", narrow.warning_message)
+        self.assertGreater(wide.crater.baseline_coverage, narrow.crater.baseline_coverage)
+        self.assertGreaterEqual(wide.crater.baseline_confidence, narrow.crater.baseline_confidence)
 
     def test_non_crater_rows_leave_crater_columns_blank(self) -> None:
         item = ImageItem(image_path="unmeasured.png", file_name="unmeasured.png", image_size=(1, 1), result=None)
