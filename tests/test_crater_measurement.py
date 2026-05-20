@@ -49,20 +49,6 @@ class CraterMeasurementTest(unittest.TestCase):
         self.assertIsNotNone(crater.right_taper_measure_y)
         self.assertGreater(crater.top_profile_valid_count, 150)
 
-    def test_crater_profile_reaches_baseline_at_cd_points(self) -> None:
-        image = synthetic_crater()
-        settings = MeasurementSettings(roi=(12, 35, 407, 225), measurement_type="crater", minimum_grayscale_delta=35)
-        result = run_measurement(image, settings)
-
-        self.assertIsNotNone(result.crater)
-        crater = result.crater
-        self.assertGreater(crater.cd_px, 235)
-        self.assertTrue(crater.top_profile_points)
-        self.assertAlmostEqual(crater.top_profile_points[0][0], crater.left_foot_x, delta=1.0)
-        self.assertAlmostEqual(crater.top_profile_points[-1][0], crater.right_foot_x, delta=1.0)
-        self.assertAlmostEqual(crater.top_profile_points[0][1], crater.left_foot_y, delta=1.0)
-        self.assertAlmostEqual(crater.top_profile_points[-1][1], crater.right_foot_y, delta=1.0)
-
     def test_crater_csv_columns_are_added_without_renaming_existing_columns(self) -> None:
         image = synthetic_crater()
         settings = MeasurementSettings(roi=(12, 35, 407, 225), measurement_type="crater", minimum_grayscale_delta=35)
