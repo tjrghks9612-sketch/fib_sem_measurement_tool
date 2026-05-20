@@ -141,7 +141,12 @@ CSV_COLUMNS = [
     "crater_baseline_y_right",
     "crater_baseline_slope",
     "crater_baseline_intercept",
+    "crater_baseline_candidate_count",
+    "crater_baseline_coverage",
     "crater_baseline_confidence",
+    "crater_baseline_y_position_ratio",
+    "crater_baseline_y_range",
+    "crater_baseline_warning_code",
     "crater_center_x",
     "crater_top_y_at_center",
     "crater_baseline_y_at_center",
@@ -272,7 +277,12 @@ def _crater_values(row: Dict[str, object], result) -> None:
     row["crater_baseline_y_right"] = result.baseline_y_right
     row["crater_baseline_slope"] = result.baseline_slope
     row["crater_baseline_intercept"] = result.baseline_intercept
+    row["crater_baseline_candidate_count"] = result.baseline_candidate_count
+    row["crater_baseline_coverage"] = result.baseline_coverage
     row["crater_baseline_confidence"] = result.baseline_confidence
+    row["crater_baseline_y_position_ratio"] = result.baseline_y_position_ratio
+    row["crater_baseline_y_range"] = result.baseline_y_range
+    row["crater_baseline_warning_code"] = result.baseline_warning_code
     row["crater_center_x"] = result.center_x
     row["crater_top_y_at_center"] = result.top_y_at_center
     row["crater_baseline_y_at_center"] = result.baseline_y_at_center

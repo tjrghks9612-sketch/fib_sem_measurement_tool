@@ -113,7 +113,7 @@
 ## Crater 1.png
 - expected_mode: Crater
 - measured_values: crater_cd_px=664, crater_thk_px=154.9, crater_left_taper_deg=40.57, crater_right_taper_deg=40.67
-- confidence: 83.83
+- confidence: 83.82
 - status: OK
 - warning_message: -
 - overlay_path: validation_outputs/overlays/Crater 1_overlay.png

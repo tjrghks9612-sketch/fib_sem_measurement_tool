@@ -234,8 +234,13 @@ class CraterResult:
     baseline_y_right: Optional[float] = None
     baseline_slope: Optional[float] = None
     baseline_intercept: Optional[float] = None
+    baseline_candidate_count: int = 0
+    baseline_coverage: float = 0.0
     baseline_confidence: float = 0.0
     baseline_status: str = "Fail"
+    baseline_y_position_ratio: Optional[float] = None
+    baseline_y_range: Optional[float] = None
+    baseline_warning_code: str = ""
     center_x: Optional[float] = None
     top_y_at_center: Optional[float] = None
     baseline_y_at_center: Optional[float] = None

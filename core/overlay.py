@@ -572,6 +572,25 @@ def _draw_crater(image: np.ndarray, result, settings: MeasurementSettings) -> No
                 scale=0.42,
                 avoid=tuple(avoid_boxes),
             )
+        if result.warning_message and any(
+            code in result.warning_message
+            for code in (
+                "crater_baseline_coverage_low",
+                "crater_baseline_unstable",
+                "crater_roi_needs_more_baseline",
+                "crater_baseline_may_be_too_high",
+                "crater_partial_dome_detected",
+            )
+        ):
+            anchor = (14, int(max(38, min(image.shape[0] - 36, (result.baseline_line or (0, image.shape[0] * 0.65, 0, 0))[1] - 36))))
+            _label(
+                image,
+                "Check baseline / widen ROI",
+                anchor,
+                FAIL_COLOR,
+                scale=0.42,
+                avoid=tuple(avoid_boxes),
+            )
 
 
 def _draw_legend(image: np.ndarray, result: Optional[MeasurementResult], settings: MeasurementSettings, language: str) -> None:
@@ -604,6 +623,11 @@ def _draw_summary(image: np.ndarray, result: MeasurementResult, settings: Measur
             lines.append(f"Crater THK {_format_value(result.crater.thk_px, settings)}")
         if result.crater.avg_taper_angle is not None:
             lines.append(f"{t(language, 'average_taper')} {result.crater.avg_taper_angle:.1f} deg")
+        if result.crater.warning_message and any(
+            code in result.crater.warning_message
+            for code in ("crater_roi_needs_more_baseline", "crater_partial_dome_detected", "crater_baseline_may_be_too_high")
+        ):
+            lines.append("Check baseline / widen ROI")
 
     x = 14
     y = 14

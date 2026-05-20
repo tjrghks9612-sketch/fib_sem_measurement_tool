@@ -24,6 +24,19 @@ class _LineFit:
     status: str
 
 
+@dataclass
+class _BaselineFit:
+    slope: float
+    intercept: float
+    confidence: float
+    status: str
+    candidate_count: int
+    coverage: float
+    y_position_ratio: float
+    y_range: float
+    warning_code: str = ""
+
+
 def _empty_result(message: str) -> MeasurementResult:
     crater = CraterResult(status=MeasurementStatus.FAIL.value, warning_message=message)
     return MeasurementResult(
@@ -46,41 +59,109 @@ def _moving_median(values: np.ndarray, window: int = 9) -> np.ndarray:
     return out
 
 
-def _baseline_candidates(grad_y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _baseline_candidates(grad_y: np.ndarray) -> tuple[np.ndarray, np.ndarray, int, float]:
     h, w = grad_y.shape
-    y1 = int(h * 0.34)
-    y2 = int(h * 0.78)
+    y1 = int(h * 0.28)
+    y2 = int(h * 0.94)
     if y2 <= y1 + 4:
-        return np.asarray([], dtype=np.float32), np.asarray([], dtype=np.float32)
-    columns = np.r_[np.arange(0, max(1, int(w * 0.24))), np.arange(min(w, int(w * 0.76)), w)]
-    xs: List[float] = []
-    ys: List[float] = []
-    for x in columns:
-        profile = grad_y[y1:y2, int(x)]
-        if profile.size < 3:
+        return np.asarray([], dtype=np.float32), np.asarray([], dtype=np.float32), 0, 0.0
+
+    stages = (0.24, 0.34, 0.46, 0.62, 1.0)
+    min_strength = max(1.0, float(np.percentile(grad_y[y1:y2, :], 72.0)))
+    best: Optional[tuple[float, np.ndarray, np.ndarray, float]] = None
+    total_candidate_count = 0
+
+    for side_width in stages:
+        if side_width >= 0.99:
+            columns = np.arange(0, w)
+        else:
+            left_end = max(1, int(w * side_width))
+            right_start = min(w, int(w * (1.0 - side_width)))
+            columns = np.r_[np.arange(0, left_end), np.arange(right_start, w)]
+        if columns.size < 3:
             continue
-        peak = int(np.argmax(profile)) + y1
-        strength = float(grad_y[peak, int(x)])
-        if strength <= 0:
+
+        candidates: list[tuple[float, float, float]] = []
+        for x in columns:
+            profile = grad_y[y1:y2, int(x)]
+            if profile.size < 3:
+                continue
+            local_max = float(np.max(profile))
+            threshold = max(min_strength, local_max * 0.35)
+            for local_y in range(1, profile.size - 1):
+                value = float(profile[local_y])
+                if value < threshold:
+                    continue
+                if value >= float(profile[local_y - 1]) and value >= float(profile[local_y + 1]):
+                    y = float(y1 + local_y)
+                    # Keep weak preference for lower, stable floor-like edges without forbidding shallower ROIs.
+                    candidates.append((float(x), y, value * (0.65 + 0.35 * (y / max(1, h - 1)))))
+        total_candidate_count += len(candidates)
+        if not candidates:
             continue
-        xs.append(float(x))
-        ys.append(float(peak))
-    return np.asarray(xs, dtype=np.float32), np.asarray(ys, dtype=np.float32)
+
+        ys_all = np.asarray([item[1] for item in candidates], dtype=np.float32)
+        strengths = np.asarray([item[2] for item in candidates], dtype=np.float32)
+        bin_size = max(4.0, h * 0.018)
+        bins = np.round(ys_all / bin_size).astype(int)
+        for bucket in np.unique(bins):
+            mask = np.abs(bins - bucket) <= 1
+            if int(np.sum(mask)) < max(6, int(columns.size * 0.04)):
+                continue
+            cluster_xs = np.asarray([candidates[i][0] for i in np.flatnonzero(mask)], dtype=np.float32)
+            cluster_ys = ys_all[mask]
+            cluster_strengths = strengths[mask]
+            unique_columns = len(set(int(round(x)) for x in cluster_xs))
+            coverage = float(unique_columns / max(1, columns.size))
+            y_ratio = float(np.median(cluster_ys) / max(1, h - 1))
+            left_cov = float(np.mean(cluster_xs <= w * 0.5))
+            balance = 1.0 - abs(left_cov - 0.5) * 2.0
+            y_range = float(np.percentile(cluster_ys, 90) - np.percentile(cluster_ys, 10))
+            score = (
+                coverage * 130.0
+                + y_ratio * 70.0
+                + max(0.0, balance) * 25.0
+                + float(np.median(cluster_strengths)) * 0.2
+                - y_range * 2.5
+                - (0.0 if y_ratio >= 0.48 else 40.0)
+            )
+            if best is None or score > best[0]:
+                best = (score, cluster_xs, cluster_ys, coverage)
+        if best is not None and best[3] >= 0.18:
+            break
+
+    if best is None:
+        return np.asarray([], dtype=np.float32), np.asarray([], dtype=np.float32), total_candidate_count, 0.0
+    _score, xs, ys, coverage = best
+    return xs.astype(np.float32), ys.astype(np.float32), total_candidate_count, float(coverage)
 
 
-def _fit_baseline(xs: np.ndarray, ys: np.ndarray, w: int) -> tuple[float, float, float, str]:
+def _fit_baseline(xs: np.ndarray, ys: np.ndarray, w: int, h: int, candidate_count: int, coverage: float) -> _BaselineFit:
     if xs.size < max(8, int(w * 0.08)):
-        return 0.0, 0.0, 0.0, MeasurementStatus.FAIL.value
+        return _BaselineFit(0.0, 0.0, 0.0, MeasurementStatus.FAIL.value, int(candidate_count), float(coverage), 0.0, 0.0, "crater_baseline_coverage_low")
     median_y = float(np.median(ys))
     mad = float(np.median(np.abs(ys - median_y))) + 1e-6
     inliers = np.abs(ys - median_y) <= max(8.0, mad * 2.5)
+    y_range = float(np.percentile(ys, 90) - np.percentile(ys, 10)) if ys.size else 0.0
+    y_ratio = float(median_y / max(1, h - 1))
     if int(np.sum(inliers)) < max(8, int(xs.size * 0.35)):
-        return 0.0, median_y, 35.0, MeasurementStatus.REVIEW_NEEDED.value
+        return _BaselineFit(0.0, median_y, 35.0, MeasurementStatus.REVIEW_NEEDED.value, int(candidate_count), float(coverage), y_ratio, y_range, "crater_baseline_unstable")
     slope, intercept = np.polyfit(xs[inliers], ys[inliers], 1)
     residual = float(np.median(np.abs((slope * xs[inliers] + intercept) - ys[inliers])))
-    confidence = max(0.0, min(100.0, 100.0 - residual * 8.0))
-    status = MeasurementStatus.OK.value if confidence >= 80.0 else MeasurementStatus.CHECK.value
-    return float(slope), float(intercept), confidence, status
+    slope_penalty = abs(float(slope)) * 35.0
+    coverage_penalty = max(0.0, 0.35 - float(coverage)) * 120.0
+    high_penalty = max(0.0, 0.55 - y_ratio) * 150.0
+    range_penalty = max(0.0, y_range - max(6.0, h * 0.04)) * 2.0
+    confidence = max(0.0, min(100.0, 100.0 - residual * 8.0 - slope_penalty - coverage_penalty - high_penalty - range_penalty))
+    warning = ""
+    if coverage < 0.16:
+        warning = "crater_baseline_coverage_low"
+    elif y_ratio < 0.52:
+        warning = "crater_baseline_may_be_too_high"
+    elif y_range > max(10.0, h * 0.08):
+        warning = "crater_baseline_unstable"
+    status = _status_from_confidence(confidence)
+    return _BaselineFit(float(slope), float(intercept), confidence, status, int(candidate_count), float(coverage), y_ratio, y_range, warning)
 
 
 def _extract_top_profile(grad_y: np.ndarray, baseline_y: np.ndarray, limit: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -317,8 +398,12 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
     h, w = grad_y.shape
     limit = float(getattr(settings, "minimum_grayscale_delta", 55.0))
 
-    base_xs, base_ys = _baseline_candidates(grad_y)
-    slope, intercept, baseline_confidence, baseline_status = _fit_baseline(base_xs, base_ys, w)
+    base_xs, base_ys, baseline_candidate_count, baseline_coverage = _baseline_candidates(grad_y)
+    baseline_fit = _fit_baseline(base_xs, base_ys, w, h, baseline_candidate_count, baseline_coverage)
+    slope = baseline_fit.slope
+    intercept = baseline_fit.intercept
+    baseline_confidence = baseline_fit.confidence
+    baseline_status = baseline_fit.status
     if baseline_status == MeasurementStatus.FAIL.value:
         return _empty_result("crater_baseline_not_found")
 
@@ -415,10 +500,22 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
             taper_scores.append(25.0)
         else:
             taper_scores.append(max(0.0, min(100.0, 100.0 - float(fit.error or 0.0) * 8.0)))
+    baseline_too_high = bool((baseline_fit.y_position_ratio or 0.0) < 0.54)
+    dome_height_ratio = float(max_height / max(1, h))
+    short_profile = bool((right - left + 1) < max(24, int(w * 0.18)))
+    partial_dome = bool(
+        baseline_too_high
+        or dome_height_ratio < 0.16
+        or (baseline_fit.coverage < 0.18 and dome_height_ratio < 0.28)
+        or short_profile
+    )
+
     overall = float(np.mean([baseline_confidence, top_confidence, foot_confidence, *taper_scores]))
     warnings = []
+    if baseline_fit.warning_code:
+        warnings.append(baseline_fit.warning_code)
     if baseline_confidence < 65.0:
-        warnings.append("crater_baseline_not_found")
+        warnings.append("crater_roi_needs_more_baseline")
     if coverage < 70.0:
         warnings.append("crater_profile_coverage_low")
     if left_fit.status != MeasurementStatus.OK.value:
@@ -427,7 +524,13 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
         warnings.append("crater_right_taper_unstable")
     if smoothness > 5.0:
         warnings.append("crater_fit_error_high")
+    if partial_dome:
+        warnings.append("crater_partial_dome_detected")
     status = _status_from_confidence(overall)
+    if partial_dome and status == MeasurementStatus.OK.value:
+        status = MeasurementStatus.CHECK.value
+    if partial_dome and baseline_confidence < 60.0:
+        status = MeasurementStatus.REVIEW_NEEDED.value
     if not warnings and status != MeasurementStatus.OK.value:
         warnings.append("crater_thk_unstable")
 
@@ -449,8 +552,13 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
         baseline_y_right=float(y1 + baseline_y[right]),
         baseline_slope=slope,
         baseline_intercept=float(y1 + intercept - slope * x1),
+        baseline_candidate_count=baseline_fit.candidate_count,
+        baseline_coverage=baseline_fit.coverage,
         baseline_confidence=baseline_confidence,
         baseline_status=baseline_status,
+        baseline_y_position_ratio=baseline_fit.y_position_ratio,
+        baseline_y_range=baseline_fit.y_range,
+        baseline_warning_code=baseline_fit.warning_code,
         center_x=center_x,
         top_y_at_center=top_center,
         baseline_y_at_center=baseline_center,
@@ -484,7 +592,7 @@ def measure_crater(gray: np.ndarray, roi: Sequence[int], settings: MeasurementSe
         confidence=overall,
         overall_confidence=overall,
         status=status,
-        warning_message=";".join(warnings),
+        warning_message=";".join(dict.fromkeys(warnings)),
         top_profile_points=top_profile_points,
         left_boundary_points=left_boundary_points,
         right_boundary_points=right_boundary_points,

@@ -512,7 +512,9 @@ class OptionPanel(ctk.CTkFrame):
             taper = ""
             if left is not None and right is not None:
                 taper = f" / L {left:.1f} deg R {right:.1f} deg"
-            return f"Crater CD {result.crater.cd_px * scale:.2f} {unit} / THK {thk:.2f} {unit}{taper}"
+            warning = self._crater_warning_text(result.crater.warning_message)
+            base = f"Crater CD {result.crater.cd_px * scale:.2f} {unit} / THK {thk:.2f} {unit}{taper}"
+            return f"{base}\n{warning}" if warning else base
         if result.avg_taper_angle is not None:
             return f"{t(self.language, 'average_taper')} {result.avg_taper_angle:.2f} deg"
         if result.left_taper and result.left_taper.angle_horizontal is not None:
@@ -520,6 +522,24 @@ class OptionPanel(ctk.CTkFrame):
         if result.right_taper and result.right_taper.angle_horizontal is not None:
             return f"{t(self.language, 'right_taper')} {result.right_taper.angle_horizontal:.2f} deg"
         return t(self.language, "no_selected_result")
+
+    def _crater_warning_text(self, warning_message: str) -> str:
+        if not warning_message:
+            return ""
+        baseline_codes = {
+            "crater_baseline_coverage_low",
+            "crater_baseline_unstable",
+            "crater_roi_needs_more_baseline",
+            "crater_baseline_may_be_too_high",
+            "crater_partial_dome_detected",
+        }
+        if not any(code in warning_message for code in baseline_codes):
+            return ""
+        if self.language == "ko":
+            return "Crater baseline이 불안정합니다. ROI에 돔 전체와 좌우 바닥 기준선을 더 포함하세요."
+        if self.language == "vi":
+            return "Crater baseline không ổn định. Hãy mở rộng ROI để bao gồm toàn bộ dome và đường nền hai bên."
+        return "Crater baseline is unstable. Widen the ROI to include the full dome and both floor baselines."
 
     def get_calibration_inputs(self):
         try:
